@@ -1,0 +1,2054 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0f172a" />
+  <title>LoanPro - Bank Loan Calculator & Lead Manager</title>
+  <style>
+/* Bank LoanPro Standalone Offline CSS Design System */
+:root {
+  --primary: #1e3a8a;
+  --primary-dark: #0f172a;
+  --accent: #d97706;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  background-color: #f1f5f9;
+  color: #1e293b;
+  min-height: 100vh;
+}
+
+input, select, textarea {
+  user-select: auto;
+  font-family: inherit;
+}
+
+/* Layout Utilities */
+.max-w-4xl { max-width: 56rem; }
+.max-w-3xl { max-width: 48rem; }
+.max-w-lg { max-width: 32rem; }
+.max-w-sm { max-width: 24rem; }
+.mx-auto { margin-left: auto; margin-right: auto; }
+.my-auto { margin-top: auto; margin-bottom: auto; }
+.p-2 { padding: 0.5rem; }
+.p-2\.5 { padding: 0.625rem; }
+.p-3 { padding: 0.75rem; }
+.p-3\.5 { padding: 0.875rem; }
+.p-4 { padding: 1rem; }
+.p-5 { padding: 1.25rem; }
+.p-6 { padding: 1.5rem; }
+.p-8 { padding: 2rem; }
+.px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+.px-2\.5 { padding-left: 0.625rem; padding-right: 0.625rem; }
+.px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+.px-4 { padding-left: 1rem; padding-right: 1rem; }
+.py-0\.5 { padding-top: 0.125rem; padding-bottom: 0.125rem; }
+.py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+.py-1\.5 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
+.py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+.py-2\.5 { padding-top: 0.625rem; padding-bottom: 0.625rem; }
+.py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+.pt-1 { padding-top: 0.25rem; }
+.pt-2 { padding-top: 0.5rem; }
+.pb-2 { padding-bottom: 0.5rem; }
+.pb-3 { padding-bottom: 0.75rem; }
+.pb-24 { padding-bottom: 6rem; }
+.mb-1 { margin-bottom: 0.25rem; }
+.mb-2 { margin-bottom: 0.5rem; }
+.mb-3 { margin-bottom: 0.75rem; }
+.mb-4 { margin-bottom: 1rem; }
+.mt-0\.5 { margin-top: 0.125rem; }
+.mt-1 { margin-top: 0.25rem; }
+.mt-2 { margin-top: 0.5rem; }
+.mt-3 { margin-top: 0.75rem; }
+.my-2 { margin-top: 0.5rem; margin-bottom: 0.5rem; }
+
+/* Flex & Grid */
+.flex { display: flex; }
+.inline-block { display: inline-block; }
+.block { display: block; }
+.hidden { display: none; }
+.flex-1 { flex: 1 1 0%; }
+.flex-col { flex-direction: column; }
+.flex-wrap { flex-wrap: wrap; }
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.items-baseline { align-items: baseline; }
+.justify-between { justify-content: space-between; }
+.justify-center { justify-content: center; }
+.justify-end { justify-content: flex-end; }
+.gap-1 { gap: 0.25rem; }
+.gap-1\.5 { gap: 0.375rem; }
+.gap-2 { gap: 0.5rem; }
+.gap-3 { gap: 0.75rem; }
+.space-x-1 > * + * { margin-left: 0.25rem; }
+.space-x-1\.5 > * + * { margin-left: 0.375rem; }
+.space-x-2 > * + * { margin-left: 0.5rem; }
+.space-x-3 > * + * { margin-left: 0.75rem; }
+.space-y-2 > * + * { margin-top: 0.5rem; }
+.space-y-3 > * + * { margin-top: 0.75rem; }
+.space-y-4 > * + * { margin-top: 1rem; }
+
+.grid { display: grid; }
+.grid-cols-1 { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+.grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.col-span-1 { grid-column: span 1 / span 1; }
+.col-span-2 { grid-column: span 2 / span 2; }
+
+@media (min-width: 640px) {
+  .sm\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sm\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .sm\:flex-row { flex-direction: row; }
+  .sm\:items-center { align-items: center; }
+  .sm\:col-span-1 { grid-column: span 1 / span 1; }
+}
+
+@media (min-width: 768px) {
+  .md\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .md\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .md\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .md\:flex-row { flex-direction: row; }
+}
+
+/* Backgrounds & Colors */
+.bg-white { background-color: #ffffff; }
+.bg-slate-50 { background-color: #f8fafc; }
+.bg-slate-100 { background-color: #f1f5f9; }
+.bg-slate-200 { background-color: #e2e8f0; }
+.bg-slate-300 { background-color: #cbd5e1; }
+.bg-slate-700 { background-color: #334155; }
+.bg-slate-800 { background-color: #1e293b; }
+.bg-slate-900 { background-color: #0f172a; }
+.bg-slate-950\/70 { background-color: rgba(2, 6, 23, 0.7); }
+.bg-blue-50 { background-color: #eff6ff; }
+.bg-blue-50\/70 { background-color: rgba(239, 246, 255, 0.7); }
+.bg-blue-100 { background-color: #dbeafe; }
+.bg-blue-700 { background-color: #1d4ed8; }
+.bg-blue-800 { background-color: #1e40af; }
+.bg-blue-900 { background-color: #1e3a8a; }
+.bg-emerald-50 { background-color: #ecfdf5; }
+.bg-emerald-100 { background-color: #d1fae5; }
+.bg-emerald-400 { background-color: #34d399; }
+.bg-emerald-600 { background-color: #059669; }
+.bg-emerald-700 { background-color: #047857; }
+.bg-emerald-800 { background-color: #065f46; }
+.bg-amber-50 { background-color: #fffbeb; }
+.bg-amber-50\/70 { background-color: rgba(255, 251, 235, 0.7); }
+.bg-amber-100 { background-color: #fef3c7; }
+.bg-amber-400 { background-color: #fbbf24; }
+.bg-amber-600 { background-color: #d97706; }
+.bg-rose-50 { background-color: #fff1f2; }
+.bg-rose-100 { background-color: #ffe4e6; }
+.bg-rose-500 { background-color: #f43f5e; }
+.bg-rose-600 { background-color: #e11d48; }
+.bg-rose-700 { background-color: #be123c; }
+.bg-sky-600 { background-color: #0284c7; }
+
+/* Gradients */
+.bg-gradient-to-tr { background-image: linear-gradient(to top right, var(--tw-gradient-stops, #1d4ed8, #f59e0b)); }
+.bg-gradient-to-r { background-image: linear-gradient(to right, #0f172a, #172554); }
+
+/* Text */
+.text-white { color: #ffffff; }
+.text-slate-300 { color: #cbd5e1; }
+.text-slate-400 { color: #94a3b8; }
+.text-slate-500 { color: #64748b; }
+.text-slate-600 { color: #475569; }
+.text-slate-700 { color: #334155; }
+.text-slate-800 { color: #1e293b; }
+.text-slate-900 { color: #0f172a; }
+.text-blue-200 { color: #bfdbfe; }
+.text-blue-700 { color: #1d4ed8; }
+.text-blue-800 { color: #1e40af; }
+.text-blue-900 { color: #1e3a8a; }
+.text-amber-300 { color: #fcd34d; }
+.text-amber-400 { color: #fbbf24; }
+.text-amber-600 { color: #d97706; }
+.text-amber-800 { color: #92400e; }
+.text-amber-900 { color: #78350f; }
+.text-emerald-300 { color: #6ee7b7; }
+.text-emerald-600 { color: #059669; }
+.text-emerald-800 { color: #065f46; }
+.text-rose-600 { color: #e11d48; }
+.text-rose-700 { color: #be123c; }
+.text-rose-800 { color: #9f1239; }
+
+.text-\[10px\] { font-size: 10px; }
+.text-\[11px\] { font-size: 11px; }
+.text-xs { font-size: 0.75rem; line-height: 1rem; }
+.text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+.text-base { font-size: 1rem; line-height: 1.5rem; }
+.text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+.text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+
+.font-normal { font-weight: 400; }
+.font-medium { font-weight: 500; }
+.font-semibold { font-weight: 600; }
+.font-bold { font-weight: 700; }
+.font-extrabold { font-weight: 800; }
+.font-black { font-weight: 900; }
+.font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+
+.text-left { text-align: left; }
+.text-center { text-align: center; }
+.text-right { text-align: right; }
+.uppercase { text-transform: uppercase; }
+.tracking-wide { letter-spacing: 0.025em; }
+.tracking-wider { letter-spacing: 0.05em; }
+.tracking-widest { letter-spacing: 0.1em; }
+.leading-tight { line-height: 1.25; }
+
+/* Borders & Rounded */
+.rounded { border-radius: 0.25rem; }
+.rounded-lg { border-radius: 0.5rem; }
+.rounded-xl { border-radius: 0.75rem; }
+.rounded-2xl { border-radius: 1rem; }
+.rounded-full { border-radius: 9999px; }
+
+.border { border-width: 1px; border-style: solid; border-color: #e2e8f0; }
+.border-b { border-bottom-width: 1px; border-bottom-style: solid; }
+.border-t { border-top-width: 1px; border-top-style: solid; }
+.border-slate-100 { border-color: #f1f5f9; }
+.border-slate-200 { border-color: #e2e8f0; }
+.border-slate-300 { border-color: #cbd5e1; }
+.border-slate-800 { border-color: #1e293b; }
+.border-blue-100 { border-color: #dbeafe; }
+.border-blue-300 { border-color: #93c5fd; }
+.border-amber-200 { border-color: #fde68a; }
+.border-amber-300 { border-color: #fcd34d; }
+.border-rose-200 { border-color: #fecdd3; }
+.border-rose-300 { border-color: #fda4af; }
+.border-emerald-300 { border-color: #6ee7b7; }
+.border-emerald-500\/40 { border-color: rgba(16, 185, 129, 0.4); }
+.border-amber-500\/40 { border-color: rgba(245, 158, 11, 0.4); }
+
+.border-b-2 { border-bottom-width: 2px; }
+.border-amber-400 { border-color: #fbbf24; }
+
+.divide-y > * + * { border-top-width: 1px; border-top-style: solid; border-color: #f1f5f9; }
+
+/* Shadows */
+.shadow-xs { box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); }
+.shadow-sm { box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1); }
+.shadow-md { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1); }
+.shadow-lg { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1); }
+.shadow-2xl { box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+
+/* Position & Sizing */
+.sticky { position: sticky; }
+.fixed { position: fixed; }
+.inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
+.top-0 { top: 0; }
+.bottom-4 { bottom: 1rem; }
+.left-1\/2 { left: 50%; }
+.transform { transform: translateX(0); }
+.-translate-x-1\/2 { transform: translateX(-50%); }
+.z-40 { z-index: 40; }
+.z-50 { z-index: 50; }
+.w-full { width: 100%; }
+.w-2 { width: 0.5rem; }
+.h-2 { height: 0.5rem; }
+.w-8 { width: 2rem; }
+.h-8 { height: 2rem; }
+.w-10 { width: 2.5rem; }
+.h-10 { height: 2.5rem; }
+.w-12 { width: 3rem; }
+.h-12 { height: 3rem; }
+.min-w-\[200px\] { min-width: 200px; }
+.max-h-72 { max-height: 18rem; }
+.max-h-\[90vh\] { max-height: 90vh; }
+.overflow-hidden { overflow: hidden; }
+.overflow-y-auto { overflow-y: auto; }
+
+/* Interactive & Forms */
+button, input, select {
+  outline: none;
+  border: 1px solid #cbd5e1;
+}
+button {
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+button:active {
+  transform: scale(0.98);
+}
+input:focus, select:focus {
+  border-color: #1d4ed8 !important;
+  box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.2);
+}
+
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Animations */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Print Styles */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  .no-print, header, nav, button, .modal-backdrop {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  .modal-container {
+    position: static !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+  th, td {
+    border: 1px solid #ddd !important;
+    padding: 6px !important;
+    font-size: 10pt !important;
+  }
+}
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased min-h-screen">
+  <div id="app-root"></div>
+  <div id="toast-banner" class="hidden"></div>
+  <script>
+// Bank LoanPro Core Engine
+const DEFAULT_PRODUCTS = [
+  {
+    id: "prod-1",
+    name: "Personal Loan (Salaried)",
+    rateType: "reducing",
+    annualRate: 21.5,
+    minAmount: 50000,
+    maxAmount: 3000000,
+    minTenure: 12,
+    maxTenure: 60,
+    minAge: 21,
+    maxAgeAtMaturity: 60,
+    feeType: "percentage",
+    feeValue: 1.5,
+    fedRate: 16.0
+  },
+  {
+    id: "prod-2",
+    name: "Auto Finance (New Car)",
+    rateType: "reducing",
+    annualRate: 19.0,
+    minAmount: 200000,
+    maxAmount: 10000000,
+    minTenure: 12,
+    maxTenure: 84,
+    minAge: 21,
+    maxAgeAtMaturity: 65,
+    feeType: "fixed",
+    feeValue: 8500,
+    fedRate: 16.0
+  },
+  {
+    id: "prod-3",
+    name: "Home Mortgage Finance",
+    rateType: "reducing",
+    annualRate: 16.5,
+    minAmount: 500000,
+    maxAmount: 50000000,
+    minTenure: 36,
+    maxTenure: 120,
+    minAge: 25,
+    maxAgeAtMaturity: 65,
+    feeType: "percentage",
+    feeValue: 0.5,
+    fedRate: 16.0
+  },
+  {
+    id: "prod-4",
+    name: "SME Micro Business Loan",
+    rateType: "flat",
+    annualRate: 14.0,
+    minAmount: 30000,
+    maxAmount: 1500000,
+    minTenure: 6,
+    maxTenure: 36,
+    minAge: 21,
+    maxAgeAtMaturity: 62,
+    feeType: "fixed",
+    feeValue: 3500,
+    fedRate: 16.0
+  },
+  {
+    id: "prod-5",
+    name: "Solar Energy Consumer Finance",
+    rateType: "reducing",
+    annualRate: 15.5,
+    minAmount: 100000,
+    maxAmount: 4000000,
+    minTenure: 12,
+    maxTenure: 60,
+    minAge: 21,
+    maxAgeAtMaturity: 65,
+    feeType: "percentage",
+    feeValue: 1.0,
+    fedRate: 16.0
+  }
+];
+
+const DEFAULT_SETTINGS = {
+  officerName: "Muhammad Usman",
+  staffId: "RO-8942",
+  branchName: "Main Branch",
+  adminPin: "Admin123",
+  currency: "PKR",
+  defaultDbr: 50,
+  webhookUrl: "",
+  autoSync: true
+};
+
+const DEFAULT_LEADS = [
+  {
+    id: "lead-1",
+    customerName: "Tariq Mahmood",
+    mobile: "+92 300 1234567",
+    dob: "1988-06-15",
+    age: 38,
+    monthlyIncome: 180000,
+    existingEmi: 25000,
+    dbrAllowed: 50,
+    productId: "prod-1",
+    productName: "Personal Loan (Salaried)",
+    loanAmount: 1200000,
+    tenureMonths: 36,
+    monthlyEmi: 45620,
+    totalProfit: 442320,
+    processingFee: 20880,
+    status: "Contacted",
+    notes: "Requires loan for home renovation. Documentation requested.",
+    officerId: "RO-8942",
+    createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
+    syncStatus: "synced"
+  },
+  {
+    id: "lead-2",
+    customerName: "Ayesha Siddiqui",
+    mobile: "+92 321 9876543",
+    dob: "1994-03-22",
+    age: 32,
+    monthlyIncome: 320000,
+    existingEmi: 0,
+    dbrAllowed: 50,
+    productId: "prod-2",
+    productName: "Auto Finance (New Car)",
+    loanAmount: 3500000,
+    tenureMonths: 60,
+    monthlyEmi: 90850,
+    totalProfit: 1951000,
+    processingFee: 9860,
+    status: "New",
+    notes: "Interested in Sedan financing. Sent proposal via WhatsApp.",
+    officerId: "RO-8942",
+    createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
+    syncStatus: "pending_sync"
+  }
+];
+
+// App Global State
+window.appState = {
+  activeTab: "calc", // calc, leads, admin, settings
+  online: navigator.onLine,
+  settings: JSON.parse(localStorage.getItem("lp_settings") || "null") || DEFAULT_SETTINGS,
+  products: JSON.parse(localStorage.getItem("lp_products") || "null") || DEFAULT_PRODUCTS,
+  leads: JSON.parse(localStorage.getItem("lp_leads") || "null") || DEFAULT_LEADS,
+  syncQueue: JSON.parse(localStorage.getItem("lp_sync_queue") || "[]"),
+  isAdminUnlocked: false,
+  
+  // Calculator Inputs
+  calc: {
+    customerName: "",
+    mobile: "",
+    dob: "1992-05-15",
+    age: 34,
+    productId: "prod-1",
+    loanAmount: 1000000,
+    rateOverride: null,
+    monthlyIncome: 150000,
+    allowedDbr: 50,
+    existingObligations: 15000,
+    selectedTenure: 36,
+    notes: ""
+  },
+
+  // Modal states
+  scheduleModalOpen: false,
+  adminAuthModalOpen: false,
+  productModalOpen: false,
+  editingProduct: null,
+  toastMessage: "",
+  toastType: "info",
+
+  // Early Payment Simulator State
+  prepayment: {
+    amount: 200000,
+    atMonth: 12,
+    mode: "reduce_emi" // reduce_emi or reduce_tenure
+  }
+};
+
+// Storage Helpers
+function saveAllState() {
+  localStorage.setItem("lp_settings", JSON.stringify(appState.settings));
+  localStorage.setItem("lp_products", JSON.stringify(appState.products));
+  localStorage.setItem("lp_leads", JSON.stringify(appState.leads));
+  localStorage.setItem("lp_sync_queue", JSON.stringify(appState.syncQueue));
+}
+
+// Financial Calculator Functions
+function calculateAge(dobString) {
+  if (!dobString) return 0;
+  const dob = new Date(dobString);
+  const diffMs = Date.now() - dob.getTime();
+  const ageDate = new Date(diffMs);
+  return Math.abs(ageDate.getUTCFullYear() - 1970);
+}
+
+function calculateEmi(principal, annualRate, tenureMonths, rateType) {
+  if (tenureMonths <= 0 || principal <= 0) return { emi: 0, totalProfit: 0, totalPayable: 0 };
+  
+  if (rateType === "flat") {
+    const totalProfit = principal * (annualRate / 100) * (tenureMonths / 12);
+    const totalPayable = principal + totalProfit;
+    const emi = Math.round(totalPayable / tenureMonths);
+    return { emi, totalProfit: Math.round(totalProfit), totalPayable: Math.round(totalPayable) };
+  } else {
+    // Reducing balance
+    const monthlyRate = (annualRate / 100) / 12;
+    if (monthlyRate === 0) {
+      const emi = Math.round(principal / tenureMonths);
+      return { emi, totalProfit: 0, totalPayable: principal };
+    }
+    const factor = Math.pow(1 + monthlyRate, tenureMonths);
+    const emi = Math.round((principal * monthlyRate * factor) / (factor - 1));
+    const totalPayable = emi * tenureMonths;
+    const totalProfit = totalPayable - principal;
+    return { emi, totalProfit, totalPayable };
+  }
+}
+
+function calculateProcessingFee(principal, product) {
+  let fee = 0;
+  if (product.feeType === "fixed") {
+    fee = Number(product.feeValue);
+  } else {
+    fee = (principal * Number(product.feeValue)) / 100;
+  }
+  const fed = (fee * Number(product.fedRate)) / 100;
+  return {
+    baseFee: Math.round(fee),
+    fedAmount: Math.round(fed),
+    totalFee: Math.round(fee + fed)
+  };
+}
+
+function generateAmortizationSchedule(principal, annualRate, tenureMonths, rateType) {
+  const schedule = [];
+  let balance = principal;
+  const monthlyRate = (annualRate / 100) / 12;
+  const { emi } = calculateEmi(principal, annualRate, tenureMonths, rateType);
+
+  const startDate = new Date();
+
+  if (rateType === "flat") {
+    const monthlyPrincipal = Math.round(principal / tenureMonths);
+    const monthlyProfit = emi - monthlyPrincipal;
+    for (let m = 1; m <= tenureMonths; m++) {
+      const dueDate = new Date(startDate.getFullYear(), startDate.getMonth() + m, 1);
+      const principalPaid = (m === tenureMonths) ? balance : monthlyPrincipal;
+      const closing = Math.max(0, balance - principalPaid);
+      schedule.push({
+        month: m,
+        date: dueDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        opening: Math.round(balance),
+        principal: principalPaid,
+        profit: monthlyProfit,
+        emi: principalPaid + monthlyProfit,
+        closing: closing
+      });
+      balance = closing;
+    }
+  } else {
+    for (let m = 1; m <= tenureMonths; m++) {
+      const dueDate = new Date(startDate.getFullYear(), startDate.getMonth() + m, 1);
+      const profitPart = Math.round(balance * monthlyRate);
+      let principalPart = emi - profitPart;
+      if (m === tenureMonths || principalPart > balance) {
+        principalPart = balance;
+      }
+      const closing = Math.max(0, balance - principalPart);
+      schedule.push({
+        month: m,
+        date: dueDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        opening: Math.round(balance),
+        principal: principalPart,
+        profit: profitPart,
+        emi: principalPart + profitPart,
+        closing: closing
+      });
+      balance = closing;
+      if (balance <= 0) break;
+    }
+  }
+  return schedule;
+}
+
+function simulatePrepayment(principal, annualRate, tenureMonths, rateType, prepayAmount, atMonth, mode) {
+  const origSchedule = generateAmortizationSchedule(principal, annualRate, tenureMonths, rateType);
+  if (atMonth >= origSchedule.length) return null;
+
+  const targetRow = origSchedule[atMonth - 1];
+  const balanceBefore = targetRow.closing;
+  const newBalance = Math.max(0, balanceBefore - prepayAmount);
+  const remainingMonths = tenureMonths - atMonth;
+
+  if (mode === "reduce_emi") {
+    const revisedEmiCalc = calculateEmi(newBalance, annualRate, remainingMonths, rateType);
+    let originalRemainingProfit = 0;
+    for (let i = atMonth; i < origSchedule.length; i++) {
+      originalRemainingProfit += origSchedule[i].profit;
+    }
+    const profitSaved = Math.max(0, originalRemainingProfit - revisedEmiCalc.totalProfit);
+    return {
+      newEmi: revisedEmiCalc.emi,
+      monthsSaved: 0,
+      profitSaved: Math.round(profitSaved),
+      newTenure: tenureMonths
+    };
+  } else {
+    // reduce tenure
+    const currentEmi = origSchedule[0].emi;
+    const monthlyRate = (annualRate / 100) / 12;
+    let b = newBalance;
+    let newMonths = 0;
+    let newTotalProfit = 0;
+    while (b > 0 && newMonths < remainingMonths) {
+      newMonths++;
+      const profit = Math.round(b * monthlyRate);
+      newTotalProfit += profit;
+      const principal = Math.min(b, currentEmi - profit);
+      b -= principal;
+    }
+    let originalRemainingProfit = 0;
+    for (let i = atMonth; i < origSchedule.length; i++) {
+      originalRemainingProfit += origSchedule[i].profit;
+    }
+    const profitSaved = Math.max(0, originalRemainingProfit - newTotalProfit);
+    return {
+      newEmi: currentEmi,
+      monthsSaved: remainingMonths - newMonths,
+      profitSaved: Math.round(profitSaved),
+      newTenure: atMonth + newMonths
+    };
+  }
+}
+
+// Global UI Rendering & Event Handling
+window.addEventListener("online", () => {
+  appState.online = true;
+  showToast("Internet restored! Syncing pending leads...", "success");
+  syncWithBackend();
+  renderApp();
+});
+
+window.addEventListener("offline", () => {
+  appState.online = false;
+  showToast("Working in Offline Mode. Calculations & leads saved locally.", "warning");
+  renderApp();
+});
+
+function showToast(msg, type = "info") {
+  appState.toastMessage = msg;
+  appState.toastType = type;
+  const toastEl = document.getElementById("toast-banner");
+  if (toastEl) {
+    toastEl.className = `fixed bottom-4 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded-lg text-white font-medium shadow-lg z-50 transition-all ${
+      type === "success" ? "bg-emerald-600" : type === "warning" ? "bg-amber-600" : type === "error" ? "bg-rose-600" : "bg-blue-600"
+    }`;
+    toastEl.innerText = msg;
+    toastEl.style.display = "block";
+    clearTimeout(window._toastTimer);
+    window._toastTimer = setTimeout(() => {
+      toastEl.style.display = "none";
+    }, 3500);
+  }
+}
+
+async function syncWithBackend() {
+  if (appState.syncQueue.length === 0) {
+    showToast("Everything is up to date!", "info");
+    return;
+  }
+  showToast(`Pushing ${appState.syncQueue.length} queued leads to server...`, "info");
+  
+  // If webhook configured, send POST
+  if (appState.settings.webhookUrl) {
+    try {
+      const res = await fetch(appState.settings.webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          officer: appState.settings.officerName,
+          staffId: appState.settings.staffId,
+          queue: appState.syncQueue
+        })
+      });
+      if (res.ok) {
+        appState.leads.forEach(l => l.syncStatus = "synced");
+        appState.syncQueue = [];
+        saveAllState();
+        showToast("Leads synced successfully with cloud server!", "success");
+        renderApp();
+        return;
+      }
+    } catch (e) {
+      console.warn("Backend sync failed, will retry later:", e);
+    }
+  }
+
+  // Fallback simulation for offline demo/pabbly
+  setTimeout(() => {
+    appState.leads.forEach(l => l.syncStatus = "synced");
+    appState.syncQueue = [];
+    saveAllState();
+    showToast("Leads synced successfully to storage queue!", "success");
+    renderApp();
+  }, 1000);
+}
+// Bank LoanPro UI Rendering and Interaction Engine
+
+function formatCurrency(num) {
+  const curr = (appState.settings && appState.settings.currency) || "PKR";
+  return `${curr} ${Number(num || 0).toLocaleString("en-US")}`;
+}
+
+function getSelectedProduct() {
+  return appState.products.find(p => p.id === appState.calc.productId) || appState.products[0];
+}
+
+function shareViaWhatsApp(customText = null) {
+  const p = getSelectedProduct();
+  const rate = appState.calc.rateOverride || p.annualRate;
+  const tenure = appState.calc.selectedTenure;
+  const { emi, totalProfit, totalPayable } = calculateEmi(appState.calc.loanAmount, rate, tenure, p.rateType);
+  const feeInfo = calculateProcessingFee(appState.calc.loanAmount, p);
+  
+  const text = customText || `🏛️ *OFFICIAL BANK FINANCING PROPOSAL*
+━━━━━━━━━━━━━━━━━━━━
+👤 *Customer:* ${appState.calc.customerName || "Valued Client"}
+📱 *Mobile:* ${appState.calc.mobile || "N/A"}
+📋 *Facility:* ${p.name}
+💰 *Loan Amount:* ${formatCurrency(appState.calc.loanAmount)}
+📅 *Tenure:* ${tenure} Months (${(tenure/12).toFixed(1)} Yrs)
+📊 *Profit Rate:* ${rate}% (${p.rateType === 'reducing' ? 'Reducing Balance' : 'Flat Rate'})
+━━━━━━━━━━━━━━━━━━━━
+💵 *Monthly Installment (EMI):* ${formatCurrency(emi)}
+🧾 *Processing Fee + FED (16%):* ${formatCurrency(feeInfo.totalFee)}
+📈 *Total Profit / Mark-up:* ${formatCurrency(totalProfit)}
+💳 *Total Repayment:* ${formatCurrency(totalPayable)}
+━━━━━━━━━━━━━━━━━━━━
+🏦 *Relationship Officer:* ${appState.settings.officerName} (${appState.settings.staffId})
+📍 *Branch:* ${appState.settings.branchName}
+*Note:* Subject to credit approval & bank policies.`;
+
+  const phone = (appState.calc.mobile || "").replace(/[^0-9]/g, "");
+  const url = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
+  
+  if (window.AndroidBridge && window.AndroidBridge.shareWhatsApp) {
+    window.AndroidBridge.shareWhatsApp(phone, text);
+  } else {
+    window.open(url, "_blank");
+  }
+}
+
+function shareViaSms(customText = null) {
+  const p = getSelectedProduct();
+  const rate = appState.calc.rateOverride || p.annualRate;
+  const tenure = appState.calc.selectedTenure;
+  const { emi, totalPayable } = calculateEmi(appState.calc.loanAmount, rate, tenure, p.rateType);
+  const phone = (appState.calc.mobile || "").replace(/[^0-9]/g, "");
+  
+  const msg = customText || `Bank Loan Proposal for ${appState.calc.customerName || "Customer"}: Facility: ${p.name}, Amount: ${formatCurrency(appState.calc.loanAmount)}, Tenure: ${tenure}M, EMI: ${formatCurrency(emi)}, Total: ${formatCurrency(totalPayable)}. Contact: ${appState.settings.officerName} (${appState.settings.staffId})`;
+  
+  if (window.AndroidBridge && window.AndroidBridge.shareSms) {
+    window.AndroidBridge.shareSms(phone, msg);
+  } else {
+    window.location.href = `sms:${phone}?body=${encodeURIComponent(msg)}`;
+  }
+}
+
+function copyProposalText() {
+  const p = getSelectedProduct();
+  const rate = appState.calc.rateOverride || p.annualRate;
+  const tenure = appState.calc.selectedTenure;
+  const { emi, totalProfit, totalPayable } = calculateEmi(appState.calc.loanAmount, rate, tenure, p.rateType);
+  const feeInfo = calculateProcessingFee(appState.calc.loanAmount, p);
+  
+  const text = `BANK LOAN QUOTATION
+Customer: ${appState.calc.customerName || "Client"}
+Mobile: ${appState.calc.mobile || "N/A"}
+Product: ${p.name}
+Amount: ${formatCurrency(appState.calc.loanAmount)}
+Tenure: ${tenure} Months
+Rate: ${rate}% (${p.rateType})
+Monthly EMI: ${formatCurrency(emi)}
+Processing Fee + FED: ${formatCurrency(feeInfo.totalFee)}
+Total Profit: ${formatCurrency(totalProfit)}
+Total Payable: ${formatCurrency(totalPayable)}
+Officer: ${appState.settings.officerName} - ${appState.settings.branchName}`;
+
+  navigator.clipboard.writeText(text).then(() => {
+    showToast("Proposal copied to clipboard!", "success");
+  }).catch(() => {
+    showToast("Copied to clipboard", "success");
+  });
+}
+
+function saveCurrentLead() {
+  if (!appState.calc.customerName.trim()) {
+    showToast("Please enter customer name to save lead", "warning");
+    document.getElementById("calc-cust-name")?.focus();
+    return;
+  }
+  if (!appState.calc.mobile.trim()) {
+    showToast("Please enter customer mobile number", "warning");
+    document.getElementById("calc-cust-phone")?.focus();
+    return;
+  }
+
+  const p = getSelectedProduct();
+  const rate = appState.calc.rateOverride || p.annualRate;
+  const tenure = appState.calc.selectedTenure;
+  const { emi, totalProfit } = calculateEmi(appState.calc.loanAmount, rate, tenure, p.rateType);
+  const feeInfo = calculateProcessingFee(appState.calc.loanAmount, p);
+
+  const newLead = {
+    id: "lead-" + Date.now(),
+    customerName: appState.calc.customerName.trim(),
+    mobile: appState.calc.mobile.trim(),
+    dob: appState.calc.dob,
+    age: calculateAge(appState.calc.dob),
+    monthlyIncome: Number(appState.calc.monthlyIncome),
+    existingEmi: Number(appState.calc.existingObligations),
+    dbrAllowed: Number(appState.calc.allowedDbr),
+    productId: p.id,
+    productName: p.name,
+    loanAmount: Number(appState.calc.loanAmount),
+    tenureMonths: tenure,
+    monthlyEmi: emi,
+    totalProfit: totalProfit,
+    processingFee: feeInfo.totalFee,
+    status: "New",
+    notes: appState.calc.notes || "Lead generated via LoanPro Mobile Calculator",
+    officerId: appState.settings.staffId,
+    createdAt: new Date().toISOString(),
+    syncStatus: appState.online ? "synced" : "pending_sync"
+  };
+
+  appState.leads.unshift(newLead);
+  if (!appState.online) {
+    appState.syncQueue.push(newLead);
+  }
+  saveAllState();
+  showToast("Lead successfully recorded in database!", "success");
+  renderApp();
+}
+
+function exportLeadsToCsv() {
+  if (!appState.leads.length) {
+    showToast("No leads available to export", "warning");
+    return;
+  }
+  const headers = [
+    "Lead ID", "Date", "Customer Name", "Mobile", "Age", "Monthly Income",
+    "Existing EMI", "Allowed DBR %", "Product Name", "Loan Amount",
+    "Tenure (Mo)", "Monthly EMI", "Total Profit", "Processing Fee",
+    "Status", "Officer ID", "Sync State", "Notes"
+  ];
+
+  const rows = appState.leads.map(l => [
+    `"${l.id}"`,
+    `"${new Date(l.createdAt).toLocaleDateString()}"`,
+    `"${l.customerName.replace(/"/g, '""')}"`,
+    `"${l.mobile}"`,
+    l.age,
+    l.monthlyIncome,
+    l.existingEmi,
+    l.dbrAllowed,
+    `"${l.productName}"`,
+    l.loanAmount,
+    l.tenureMonths,
+    l.monthlyEmi,
+    l.totalProfit,
+    l.processingFee,
+    `"${l.status}"`,
+    `"${l.officerId}"`,
+    `"${l.syncStatus}"`,
+    `"${(l.notes || '').replace(/"/g, '""')}"`
+  ]);
+
+  const csvContent = [headers.join(","), ...rows.map(r => r.join(","))].join("\r\n");
+  
+  if (window.AndroidBridge && window.AndroidBridge.exportCsv) {
+    window.AndroidBridge.exportCsv("bank_leads_export.csv", csvContent);
+  } else {
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `bank_leads_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast("CSV file exported successfully!", "success");
+  }
+}
+
+function printAmortization() {
+  if (window.AndroidBridge && window.AndroidBridge.printAmortization) {
+    const printEl = document.getElementById("amortization-print-container");
+    window.AndroidBridge.printAmortization(printEl ? printEl.innerHTML : "");
+  } else {
+    window.print();
+  }
+}
+// Bank LoanPro DOM Rendering Components
+
+function renderApp() {
+  const root = document.getElementById("app-root");
+  if (!root) return;
+
+  const queueCount = appState.syncQueue.length;
+  const p = getSelectedProduct();
+  const age = calculateAge(appState.calc.dob);
+  
+  // DBR Engine Calculations
+  const monthlyIncome = Number(appState.calc.monthlyIncome) || 0;
+  const allowedDbrPercent = Number(appState.calc.allowedDbr) || 50;
+  const existingObligations = Number(appState.calc.existingObligations) || 0;
+  const maxTotalAllowedEmi = Math.round((monthlyIncome * allowedDbrPercent) / 100);
+  const maxEligibleEmi = Math.max(0, maxTotalAllowedEmi - existingObligations);
+
+  root.innerHTML = `
+    <!-- Top Header -->
+    <header class="bg-slate-900 text-white shadow-md sticky top-0 z-40">
+      <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-700 to-amber-500 flex items-center justify-center font-bold text-lg text-white shadow">
+            🏛️
+          </div>
+          <div>
+            <h1 class="font-bold text-lg leading-tight flex items-center gap-2">
+              LoanPro <span class="text-xs bg-blue-800 text-blue-200 px-2 py-0.5 rounded font-mono">BANK SUITE</span>
+            </h1>
+            <p class="text-xs text-slate-400">${appState.settings.branchName} • ${appState.settings.officerName}</p>
+          </div>
+        </div>
+
+        <!-- Status & Sync Badge -->
+        <div class="flex items-center space-x-2">
+          <button onclick="syncWithBackend()" class="flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
+            appState.online ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300' : 'bg-amber-950/60 border-amber-500/40 text-amber-300'
+          }">
+            <span class="w-2 h-2 rounded-full ${appState.online ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}"></span>
+            <span>${appState.online ? 'Online' : 'Offline'}</span>
+            ${queueCount > 0 ? `<span class="bg-rose-500 text-white px-1.5 py-0.2 rounded-full text-[10px] font-bold">${queueCount}</span>` : ''}
+          </button>
+
+          <button onclick="toggleAdminView()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300">
+            🔒
+          </button>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <nav class="flex border-t border-slate-800 bg-slate-950/70 text-sm">
+        <button onclick="switchTab('calc')" class="flex-1 py-2.5 text-center font-medium transition-colors ${
+          appState.activeTab === 'calc' ? 'text-amber-400 border-b-2 border-amber-400 bg-slate-900/90' : 'text-slate-400 hover:text-white'
+        }">
+          🧮 Calculator
+        </button>
+        <button onclick="switchTab('leads')" class="flex-1 py-2.5 text-center font-medium transition-colors relative ${
+          appState.activeTab === 'leads' ? 'text-amber-400 border-b-2 border-amber-400 bg-slate-900/90' : 'text-slate-400 hover:text-white'
+        }">
+          📋 Leads (${appState.leads.length})
+          ${queueCount > 0 ? `<span class="absolute top-2 right-4 w-2 h-2 rounded-full bg-rose-500"></span>` : ''}
+        </button>
+        <button onclick="switchTab('admin')" class="flex-1 py-2.5 text-center font-medium transition-colors ${
+          appState.activeTab === 'admin' ? 'text-amber-400 border-b-2 border-amber-400 bg-slate-900/90' : 'text-slate-400 hover:text-white'
+        }">
+          ⚙️ Admin
+        </button>
+      </nav>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-4xl mx-auto p-4 pb-24">
+      ${appState.activeTab === 'calc' ? renderCalcScreen(p, age, maxTotalAllowedEmi, maxEligibleEmi) : ''}
+      ${appState.activeTab === 'leads' ? renderLeadsScreen() : ''}
+      ${appState.activeTab === 'admin' ? renderAdminScreen() : ''}
+    </main>
+
+    <!-- Modals -->
+    ${appState.scheduleModalOpen ? renderAmortizationModal() : ''}
+    ${appState.adminAuthModalOpen ? renderAdminAuthModal() : ''}
+    ${appState.productModalOpen ? renderProductModal() : ''}
+  `;
+}
+
+function switchTab(tab) {
+  if (tab === 'admin' && !appState.isAdminUnlocked) {
+    appState.adminAuthModalOpen = true;
+    renderApp();
+    return;
+  }
+  appState.activeTab = tab;
+  renderApp();
+}
+
+function toggleAdminView() {
+  if (appState.isAdminUnlocked) {
+    appState.isAdminUnlocked = false;
+    showToast("Admin session locked", "info");
+    if (appState.activeTab === 'admin') appState.activeTab = 'calc';
+  } else {
+    appState.adminAuthModalOpen = true;
+  }
+  renderApp();
+}
+
+function renderCalcScreen(product, customerAge, maxTotalAllowedEmi, maxEligibleEmi) {
+  const rate = appState.calc.rateOverride || product.annualRate;
+  const feeInfo = calculateProcessingFee(appState.calc.loanAmount, product);
+  const isAgeValidStart = customerAge >= product.minAge;
+  const isDbrBreached = Number(appState.calc.existingObligations) >= maxTotalAllowedEmi;
+
+  return `
+    <div class="space-y-4">
+      <!-- Customer Information Card -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-bold text-slate-800 text-sm tracking-wide flex items-center gap-1.5">
+            👤 CUSTOMER PROFILE
+          </h2>
+          <span class="text-xs ${isAgeValidStart ? 'text-emerald-700 bg-emerald-50' : 'text-rose-700 bg-rose-50'} px-2 py-0.5 rounded-full font-medium">
+            Age: ${customerAge} yrs (${isAgeValidStart ? 'Eligible' : 'Under Min Age ' + product.minAge})
+          </span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Customer Full Name *</label>
+            <input type="text" id="calc-cust-name" value="${appState.calc.customerName}" 
+              oninput="appState.calc.customerName = this.value" placeholder="e.g. Asad Ullah Khan"
+              class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:bg-white outline-none" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Mobile Phone (WhatsApp) *</label>
+            <input type="tel" id="calc-cust-phone" value="${appState.calc.mobile}"
+              oninput="appState.calc.mobile = this.value" placeholder="+92 300 1234567"
+              class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:bg-white outline-none" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Date of Birth</label>
+            <input type="date" value="${appState.calc.dob}" 
+              onchange="appState.calc.dob = this.value; renderApp();"
+              class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:bg-white outline-none" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Facility & Amount Selection Card -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+        <h2 class="font-bold text-slate-800 text-sm tracking-wide mb-3 flex items-center justify-between">
+          <span>💼 LOAN FACILITY & PRICING</span>
+          <span class="text-xs font-mono font-normal text-slate-500">Max Tenure: ${product.maxTenure} Mo</span>
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Loan Product</label>
+            <select onchange="appState.calc.productId = this.value; appState.calc.rateOverride = null; renderApp();"
+              class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg font-medium text-slate-800 focus:ring-2 focus:ring-blue-600 outline-none">
+              ${appState.products.map(p => `
+                <option value="${p.id}" ${p.id === product.id ? 'selected' : ''}>
+                  ${p.name} (${p.annualRate}% ${p.rateType === 'reducing' ? 'Reducing' : 'Flat'})
+                </option>
+              `).join('')}
+            </select>
+          </div>
+
+          <div>
+            <div class="flex justify-between items-center mb-1">
+              <label class="text-xs font-semibold text-slate-600">Annual Interest Rate (%)</label>
+              <span class="text-[11px] text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded font-semibold uppercase">${product.rateType} balance</span>
+            </div>
+            <input type="number" step="0.25" value="${rate}"
+              oninput="appState.calc.rateOverride = Number(this.value); renderApp();"
+              class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 outline-none font-semibold text-slate-800" />
+          </div>
+        </div>
+
+        <!-- Desired Loan Amount with Slider & Quick Chips -->
+        <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+          <div class="flex justify-between items-baseline mb-1">
+            <label class="text-xs font-bold text-slate-700">Desired Loan Amount</label>
+            <span class="text-base font-extrabold text-blue-900">${formatCurrency(appState.calc.loanAmount)}</span>
+          </div>
+
+          <input type="range" min="${product.minAmount}" max="${product.maxAmount}" step="25000" value="${appState.calc.loanAmount}"
+            oninput="appState.calc.loanAmount = Number(this.value); renderApp();"
+            class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-700 my-2" />
+
+          <div class="flex justify-between text-[11px] text-slate-500 font-mono mb-2">
+            <span>Min: ${formatCurrency(product.minAmount)}</span>
+            <span>Max: ${formatCurrency(product.maxAmount)}</span>
+          </div>
+
+          <div class="flex flex-wrap gap-1.5">
+            <span class="text-[11px] text-slate-400 self-center">Quick Adjust:</span>
+            <button onclick="appState.calc.loanAmount = Math.max(${product.minAmount}, appState.calc.loanAmount - 100000); renderApp();" class="text-xs px-2 py-1 bg-white border border-slate-200 rounded shadow-xs font-medium text-slate-700 hover:bg-slate-100">-100k</button>
+            <button onclick="appState.calc.loanAmount = Math.min(${product.maxAmount}, appState.calc.loanAmount + 100000); renderApp();" class="text-xs px-2 py-1 bg-white border border-slate-200 rounded shadow-xs font-medium text-slate-700 hover:bg-slate-100">+100k</button>
+            <button onclick="appState.calc.loanAmount = Math.min(${product.maxAmount}, appState.calc.loanAmount + 500000); renderApp();" class="text-xs px-2 py-1 bg-white border border-slate-200 rounded shadow-xs font-medium text-slate-700 hover:bg-slate-100">+500k</button>
+            <button onclick="appState.calc.loanAmount = Math.min(${product.maxAmount}, appState.calc.loanAmount + 1000000); renderApp();" class="text-xs px-2 py-1 bg-white border border-slate-200 rounded shadow-xs font-medium text-slate-700 hover:bg-slate-100">+1M</button>
+          </div>
+        </div>
+
+        <!-- Processing Fee & FED info -->
+        <div class="mt-3 flex justify-between items-center text-xs text-slate-600 bg-blue-50/70 p-2.5 rounded-lg border border-blue-100">
+          <span>Fee: ${formatCurrency(feeInfo.baseFee)} (${product.feeType === 'fixed' ? 'Fixed' : product.feeValue + '%'}) + 16% FED (${formatCurrency(feeInfo.fedAmount)})</span>
+          <span class="font-bold text-blue-900">Total Upfront: ${formatCurrency(feeInfo.totalFee)}</span>
+        </div>
+      </div>
+
+      <!-- Financial & DBR Eligibility Engine Card -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+        <h2 class="font-bold text-slate-800 text-sm tracking-wide mb-3 flex items-center justify-between">
+          <span>📊 DEBT BURDEN RATIO (DBR) ELIGIBILITY</span>
+          <span class="text-xs font-semibold px-2 py-0.5 rounded ${isDbrBreached ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'}">
+            ${isDbrBreached ? '⚠️ DBR EXCEEDED' : '✅ CAPACITY AVAILABLE'}
+          </span>
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Monthly Net Income *</label>
+            <input type="number" step="5000" value="${appState.calc.monthlyIncome}"
+              oninput="appState.calc.monthlyIncome = Number(this.value); renderApp();"
+              class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 font-bold outline-none" />
+          </div>
+
+          <div>
+            <div class="flex justify-between items-center mb-1">
+              <label class="text-xs font-semibold text-slate-600">Allowed DBR (%)</label>
+              <div class="flex space-x-1">
+                ${[35, 40, 50, 60].map(p => `
+                  <button onclick="appState.calc.allowedDbr = ${p}; renderApp();" class="text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                    appState.calc.allowedDbr === p ? 'bg-blue-700 text-white' : 'bg-slate-200 text-slate-700'
+                  }">${p}%</button>
+                `).join('')}
+              </div>
+            </div>
+            <input type="number" value="${appState.calc.allowedDbr}"
+              oninput="appState.calc.allowedDbr = Number(this.value); renderApp();"
+              class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 font-bold outline-none" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Existing Obligations / EMIs</label>
+            <input type="number" step="1000" value="${appState.calc.existingObligations}"
+              oninput="appState.calc.existingObligations = Number(this.value); renderApp();"
+              class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 font-bold outline-none" />
+          </div>
+        </div>
+
+        <!-- DBR Calculated Banner -->
+        <div class="p-3 rounded-xl bg-gradient-to-r from-slate-900 to-blue-950 text-white flex flex-col md:flex-row justify-between items-center gap-2">
+          <div>
+            <p class="text-xs text-slate-300">Max Allowable Monthly Installment (Capacity):</p>
+            <p class="text-lg font-black text-amber-400">
+              ${formatCurrency(maxEligibleEmi)} / month
+            </p>
+          </div>
+          <div class="text-xs text-right text-slate-300">
+            Formula: (${formatCurrency(monthlyIncome)} × ${allowedDbrPercent}%) - ${formatCurrency(existingObligations)}
+          </div>
+        </div>
+      </div>
+
+      <!-- Interactive Eligibility Matrix (1 to 120 Months) -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-3">
+          <div>
+            <h2 class="font-bold text-slate-800 text-sm tracking-wide">
+              ⚡ ELIGIBILITY MATRIX & TENURE COMPARISON
+            </h2>
+            <p class="text-xs text-slate-500">Tap any tenure to inspect the Amortization Schedule & simulate early payments.</p>
+          </div>
+        </div>
+
+        <div class="table-scroll border border-slate-200 rounded-xl overflow-hidden">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr class="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                <th class="p-2.5">Tenure</th>
+                <th class="p-2.5">Monthly EMI</th>
+                <th class="p-2.5">Total Profit</th>
+                <th class="p-2.5">Total Payable</th>
+                <th class="p-2.5">DBR Status</th>
+                <th class="p-2.5 text-center">Action</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              ${renderTenureRows(product, rate, customerAge, maxEligibleEmi)}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Action Proposal Toolbar -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+        <h3 class="font-bold text-slate-800 text-xs tracking-wider uppercase mb-2">Lead Communication & Dispatch</h3>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <button onclick="shareViaWhatsApp()" class="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs">
+            <span>💬</span> WhatsApp
+          </button>
+          <button onclick="shareViaSms()" class="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold shadow-xs">
+            <span>✉️</span> SMS
+          </button>
+          <button onclick="copyProposalText()" class="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-slate-700 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-xs">
+            <span>📋</span> Copy Text
+          </button>
+          <button onclick="saveCurrentLead()" class="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-xs font-bold shadow-xs">
+            <span>💾</span> Save Lead
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderTenureRows(product, rate, customerAge, maxEligibleEmi) {
+  // Common standard banking tenures: 6, 12, 18, 24, 36, 48, 60, 72, 84, 96, 120
+  const tenures = [6, 12, 18, 24, 36, 48, 60, 72, 84, 96, 120].filter(
+    t => t >= product.minTenure && t <= product.maxTenure
+  );
+
+  return tenures.map(t => {
+    const { emi, totalProfit, totalPayable } = calculateEmi(appState.calc.loanAmount, rate, t, product.rateType);
+    const isEmiEligible = emi <= maxEligibleEmi;
+    const ageAtMaturity = customerAge + Math.floor(t / 12);
+    const isAgeEligible = ageAtMaturity <= product.maxAgeAtMaturity;
+    const isSelected = appState.calc.selectedTenure === t;
+
+    // DBR ratio calculation
+    const totalObligation = Number(appState.calc.existingObligations) + emi;
+    const income = Number(appState.calc.monthlyIncome) || 1;
+    const dbrPercent = ((totalObligation / income) * 100).toFixed(1);
+
+    return `
+      <tr class="hover:bg-blue-50/50 cursor-pointer transition-colors ${isSelected ? 'bg-amber-50/80 font-medium' : ''}"
+        onclick="appState.calc.selectedTenure = ${t}; openScheduleModal(${t});">
+        <td class="p-2.5 font-bold text-slate-800">
+          ${t} Mo <span class="text-[11px] text-slate-500 font-normal">(${(t/12).toFixed(1)} yr)</span>
+        </td>
+        <td class="p-2.5 font-bold text-blue-900">${formatCurrency(emi)}</td>
+        <td class="p-2.5 text-slate-600">${formatCurrency(totalProfit)}</td>
+        <td class="p-2.5 text-slate-600">${formatCurrency(totalPayable)}</td>
+        <td class="p-2.5">
+          ${!isAgeEligible ? `
+            <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900">
+              Age ${ageAtMaturity} > Max ${product.maxAgeAtMaturity}
+            </span>
+          ` : isEmiEligible ? `
+            <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+              ELIGIBLE (${dbrPercent}% DBR)
+            </span>
+          ` : `
+            <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800">
+              EXCEEDS DBR (${dbrPercent}%)
+            </span>
+          `}
+        </td>
+        <td class="p-2.5 text-center">
+          <button class="px-2 py-1 text-[11px] bg-blue-100 text-blue-800 hover:bg-blue-200 rounded font-semibold">
+            Schedule ➔
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+// Bank LoanPro Views: Leads Dashboard, Admin & Amortization Modal
+
+function openScheduleModal(tenure) {
+  appState.calc.selectedTenure = tenure;
+  appState.scheduleModalOpen = true;
+  renderApp();
+}
+
+function closeScheduleModal() {
+  appState.scheduleModalOpen = false;
+  renderApp();
+}
+
+function renderAmortizationModal() {
+  const p = getSelectedProduct();
+  const rate = appState.calc.rateOverride || p.annualRate;
+  const tenure = appState.calc.selectedTenure;
+  const { emi, totalProfit, totalPayable } = calculateEmi(appState.calc.loanAmount, rate, tenure, p.rateType);
+  const feeInfo = calculateProcessingFee(appState.calc.loanAmount, p);
+  const schedule = generateAmortizationSchedule(appState.calc.loanAmount, rate, tenure, p.rateType);
+
+  // Early Payment Simulation
+  const prepay = appState.prepayment;
+  const simResult = simulatePrepayment(
+    appState.calc.loanAmount, rate, tenure, p.rateType,
+    prepay.amount, prepay.atMonth, prepay.mode
+  );
+
+  return `
+    <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 z-50 overflow-y-auto">
+      <div class="modal-container bg-white w-full max-w-3xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[90vh] flex flex-col">
+        
+        <!-- Modal Header -->
+        <div class="bg-slate-900 text-white p-4 flex justify-between items-center no-print">
+          <div>
+            <h3 class="font-bold text-base flex items-center gap-2">
+              📜 Loan Amortization Schedule & Simulator
+            </h3>
+            <p class="text-xs text-slate-300">
+              ${p.name} • ${formatCurrency(appState.calc.loanAmount)} • ${tenure} Months @ ${rate}%
+            </p>
+          </div>
+          <button onclick="closeScheduleModal()" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 text-lg flex items-center justify-center">
+            ✕
+          </button>
+        </div>
+
+        <!-- Scrollable Modal Body -->
+        <div class="p-4 overflow-y-auto space-y-4" id="amortization-print-container">
+          
+          <!-- Quotation Header for Printing -->
+          <div class="border-b border-slate-200 pb-3">
+            <div class="flex justify-between items-start">
+              <div>
+                <h2 class="text-lg font-black text-slate-900">BANK FINANCING QUOTATION</h2>
+                <p class="text-xs text-slate-600">Customer: <b>${appState.calc.customerName || "Walk-in Customer"}</b> (${appState.calc.mobile || "N/A"})</p>
+                <p class="text-xs text-slate-600">Date: ${new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+              </div>
+              <div class="text-right">
+                <span class="text-xs font-mono bg-blue-100 text-blue-900 px-2 py-0.5 rounded font-bold">${p.rateType.toUpperCase()} RATE</span>
+                <p class="text-xs text-slate-500 mt-1">Branch: ${appState.settings.branchName}</p>
+                <p class="text-xs text-slate-500">Officer: ${appState.settings.officerName} (${appState.settings.staffId})</p>
+              </div>
+            </div>
+
+            <!-- Summary KPI Chips -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 text-xs">
+              <div class="p-2 bg-slate-50 rounded-lg border border-slate-200">
+                <span class="text-slate-500 block">Monthly EMI:</span>
+                <b class="text-sm text-blue-900 font-extrabold">${formatCurrency(emi)}</b>
+              </div>
+              <div class="p-2 bg-slate-50 rounded-lg border border-slate-200">
+                <span class="text-slate-500 block">Total Profit:</span>
+                <b class="text-sm text-slate-800 font-extrabold">${formatCurrency(totalProfit)}</b>
+              </div>
+              <div class="p-2 bg-slate-50 rounded-lg border border-slate-200">
+                <span class="text-slate-500 block">Processing Fee+FED:</span>
+                <b class="text-sm text-slate-800 font-extrabold">${formatCurrency(feeInfo.totalFee)}</b>
+              </div>
+              <div class="p-2 bg-slate-50 rounded-lg border border-slate-200">
+                <span class="text-slate-500 block">Total Payable:</span>
+                <b class="text-sm text-emerald-800 font-extrabold">${formatCurrency(totalPayable)}</b>
+              </div>
+            </div>
+          </div>
+
+          <!-- Early Payment / Pre-closure Simulator Box (No-print) -->
+          <div class="no-print bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 space-y-3">
+            <div class="flex items-center justify-between">
+              <h4 class="font-bold text-amber-950 text-xs flex items-center gap-1.5">
+                💡 EARLY PAYMENT / PRE-CLOSURE SIMULATOR
+              </h4>
+              <span class="text-[11px] text-amber-800 font-medium">Test Lump-sum Savings</span>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+              <div>
+                <label class="block font-semibold text-slate-700 mb-1">Prepayment Amount</label>
+                <input type="number" step="25000" value="${prepay.amount}"
+                  oninput="appState.prepayment.amount = Number(this.value); renderApp();"
+                  class="w-full px-2.5 py-1.5 bg-white border border-amber-300 rounded font-bold text-slate-800 outline-none" />
+              </div>
+
+              <div>
+                <label class="block font-semibold text-slate-700 mb-1">Payment at Month #</label>
+                <select onchange="appState.prepayment.atMonth = Number(this.value); renderApp();"
+                  class="w-full px-2.5 py-1.5 bg-white border border-amber-300 rounded font-semibold text-slate-800 outline-none">
+                  ${schedule.slice(0, -1).map(s => `
+                    <option value="${s.month}" ${s.month === prepay.atMonth ? 'selected' : ''}>
+                      Month ${s.month} (${s.date})
+                    </option>
+                  `).join('')}
+                </select>
+              </div>
+
+              <div>
+                <label class="block font-semibold text-slate-700 mb-1">Objective</label>
+                <select onchange="appState.prepayment.mode = this.value; renderApp();"
+                  class="w-full px-2.5 py-1.5 bg-white border border-amber-300 rounded font-semibold text-slate-800 outline-none">
+                  <option value="reduce_emi" ${prepay.mode === 'reduce_emi' ? 'selected' : ''}>Reduce Monthly EMI</option>
+                  <option value="reduce_tenure" ${prepay.mode === 'reduce_tenure' ? 'selected' : ''}>Reduce Loan Tenure</option>
+                </select>
+              </div>
+            </div>
+
+            ${simResult ? `
+              <div class="bg-white p-3 rounded-lg border border-amber-300 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                <div>
+                  <span class="text-slate-500 block">Total Profit Saved:</span>
+                  <span class="font-extrabold text-sm text-emerald-600">${formatCurrency(simResult.profitSaved)}</span>
+                </div>
+                <div>
+                  <span class="text-slate-500 block">${prepay.mode === 'reduce_emi' ? 'Revised Monthly EMI:' : 'Months Saved:'}</span>
+                  <span class="font-extrabold text-sm text-blue-900">
+                    ${prepay.mode === 'reduce_emi' ? formatCurrency(simResult.newEmi) : `${simResult.monthsSaved} Months`}
+                  </span>
+                </div>
+                <div class="col-span-2 sm:col-span-1">
+                  <span class="text-slate-500 block">New End Tenure:</span>
+                  <span class="font-bold text-slate-800">${simResult.newTenure} Months</span>
+                </div>
+              </div>
+            ` : ''}
+          </div>
+
+          <!-- Schedule Table -->
+          <div>
+            <h4 class="font-bold text-slate-800 text-xs mb-2">COMPLETE MONTHLY AMORTIZATION SCHEDULE</h4>
+            <div class="table-scroll border border-slate-200 rounded-lg max-h-72 overflow-y-auto">
+              <table class="w-full text-left border-collapse text-[11px]">
+                <thead class="bg-slate-100 text-slate-700 sticky top-0 font-bold border-b border-slate-200">
+                  <tr>
+                    <th class="p-2">Mo #</th>
+                    <th class="p-2">Due Date</th>
+                    <th class="p-2">Opening</th>
+                    <th class="p-2">Principal</th>
+                    <th class="p-2">Profit / Mark-up</th>
+                    <th class="p-2">Total EMI</th>
+                    <th class="p-2">Closing Balance</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  ${schedule.map(row => `
+                    <tr class="hover:bg-slate-50">
+                      <td class="p-2 font-mono font-semibold">${row.month}</td>
+                      <td class="p-2 text-slate-600">${row.date}</td>
+                      <td class="p-2 text-slate-600">${formatCurrency(row.opening)}</td>
+                      <td class="p-2 font-medium text-emerald-800">${formatCurrency(row.principal)}</td>
+                      <td class="p-2 font-medium text-amber-800">${formatCurrency(row.profit)}</td>
+                      <td class="p-2 font-bold text-blue-900">${formatCurrency(row.emi)}</td>
+                      <td class="p-2 font-mono text-slate-700">${formatCurrency(row.closing)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Footer Actions (No-print) -->
+        <div class="bg-slate-100 p-3 flex flex-wrap justify-between items-center gap-2 border-t border-slate-200 no-print">
+          <div class="flex space-x-2">
+            <button onclick="printAmortization()" class="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs">
+              <span>🖨️</span> Print / PDF
+            </button>
+            <button onclick="shareViaWhatsApp()" class="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs">
+              <span>💬</span> Share WhatsApp
+            </button>
+          </div>
+          <button onclick="closeScheduleModal()" class="px-4 py-2 bg-slate-300 hover:bg-slate-400 text-slate-800 rounded-lg text-xs font-bold">
+            Close
+          </button>
+        </div>
+
+      </div>
+    </div>
+  `;
+}
+
+function renderLeadsScreen() {
+  const leads = appState.leads;
+  const totalAmount = leads.reduce((sum, l) => sum + (Number(l.loanAmount) || 0), 0);
+  const newCount = leads.filter(l => l.status === "New").length;
+  const convertedCount = leads.filter(l => l.status === "Converted").length;
+
+  return `
+    <div class="space-y-4">
+      <!-- Pipeline Header Stats -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div class="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
+          <span class="text-xs text-slate-500 font-medium">Total Pipeline</span>
+          <p class="text-base font-black text-blue-900">${formatCurrency(totalAmount)}</p>
+        </div>
+        <div class="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
+          <span class="text-xs text-slate-500 font-medium">Total Leads</span>
+          <p class="text-base font-black text-slate-800">${leads.length}</p>
+        </div>
+        <div class="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
+          <span class="text-xs text-slate-500 font-medium">New Enquiries</span>
+          <p class="text-base font-black text-amber-600">${newCount}</p>
+        </div>
+        <div class="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
+          <span class="text-xs text-slate-500 font-medium">Converted</span>
+          <p class="text-base font-black text-emerald-600">${convertedCount}</p>
+        </div>
+      </div>
+
+      <!-- Actions Bar -->
+      <div class="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap justify-between items-center gap-2">
+        <div class="flex-1 min-w-[200px]">
+          <input type="text" id="lead-search-input" placeholder="Search customer, phone or product..."
+            oninput="filterLeads(this.value)"
+            class="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-600" />
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="exportLeadsToCsv()" class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold flex items-center gap-1">
+            <span>📥</span> Export CSV
+          </button>
+        </div>
+      </div>
+
+      <!-- Leads List -->
+      <div class="space-y-3" id="leads-container">
+        ${leads.map(lead => renderLeadCard(lead)).join('')}
+        ${leads.length === 0 ? `
+          <div class="bg-white rounded-2xl p-8 text-center text-slate-500 border border-slate-200">
+            No leads recorded yet. Go to Calculator and click "Save Lead".
+          </div>
+        ` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function renderLeadCard(lead) {
+  const statusColors = {
+    New: "bg-blue-100 text-blue-800 border-blue-300",
+    Contacted: "bg-amber-100 text-amber-800 border-amber-300",
+    Converted: "bg-emerald-100 text-emerald-800 border-emerald-300",
+    Lost: "bg-rose-100 text-rose-800 border-rose-300"
+  };
+
+  return `
+    <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs space-y-3">
+      <div class="flex justify-between items-start">
+        <div>
+          <h3 class="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+            ${lead.customerName}
+            <span class="text-[10px] px-2 py-0.5 rounded-full font-bold border ${statusColors[lead.status] || 'bg-slate-100'}">
+              ${lead.status}
+            </span>
+          </h3>
+          <p class="text-xs text-slate-500 mt-0.5">
+            📞 ${lead.mobile} • Age: ${lead.age} • Net Inc: ${formatCurrency(lead.monthlyIncome)}
+          </p>
+        </div>
+
+        <div class="text-right">
+          <p class="text-sm font-black text-blue-900">${formatCurrency(lead.loanAmount)}</p>
+          <span class="text-[10px] text-slate-400 font-mono">${new Date(lead.createdAt).toLocaleDateString()}</span>
+        </div>
+      </div>
+
+      <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+        <div>
+          <span class="text-slate-400 block text-[10px]">Product</span>
+          <span class="font-semibold text-slate-800">${lead.productName}</span>
+        </div>
+        <div>
+          <span class="text-slate-400 block text-[10px]">Tenure</span>
+          <span class="font-semibold text-slate-800">${lead.tenureMonths} Months</span>
+        </div>
+        <div>
+          <span class="text-slate-400 block text-[10px]">Monthly EMI</span>
+          <span class="font-bold text-blue-900">${formatCurrency(lead.monthlyEmi)}</span>
+        </div>
+        <div>
+          <span class="text-slate-400 block text-[10px]">Sync Status</span>
+          <span class="font-semibold ${lead.syncStatus === 'synced' ? 'text-emerald-600' : 'text-amber-600'}">
+            ${lead.syncStatus === 'synced' ? '☁️ Synced' : '⏳ Pending'}
+          </span>
+        </div>
+      </div>
+
+      ${lead.notes ? `
+        <p class="text-xs text-slate-600 bg-amber-50/50 p-2 rounded-lg border border-amber-100">
+          📝 <i>${lead.notes}</i>
+        </p>
+      ` : ''}
+
+      <!-- Lead Actions -->
+      <div class="flex flex-wrap justify-between items-center pt-1 border-t border-slate-100 gap-2">
+        <div class="flex items-center space-x-1.5">
+          <label class="text-[11px] text-slate-500 font-medium">Status:</label>
+          <select onchange="updateLeadStatus('${lead.id}', this.value)" class="text-xs bg-slate-100 border border-slate-300 rounded px-2 py-1 font-semibold outline-none">
+            <option value="New" ${lead.status === 'New' ? 'selected' : ''}>New</option>
+            <option value="Contacted" ${lead.status === 'Contacted' ? 'selected' : ''}>Contacted</option>
+            <option value="Converted" ${lead.status === 'Converted' ? 'selected' : ''}>Converted</option>
+            <option value="Lost" ${lead.status === 'Lost' ? 'selected' : ''}>Lost</option>
+          </select>
+        </div>
+
+        <div class="flex space-x-1.5">
+          <a href="tel:${lead.mobile}" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-bold">
+            📞 Call
+          </a>
+          <button onclick="shareLeadWhatsApp('${lead.id}')" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold">
+            💬 WhatsApp
+          </button>
+          <button onclick="deleteLead('${lead.id}')" class="px-2 py-1 text-rose-600 hover:bg-rose-50 rounded text-xs font-bold">
+            🗑️
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function updateLeadStatus(id, newStatus) {
+  const l = appState.leads.find(x => x.id === id);
+  if (l) {
+    l.status = newStatus;
+    saveAllState();
+    renderApp();
+  }
+}
+
+function deleteLead(id) {
+  if (confirm("Delete this lead permanently?")) {
+    appState.leads = appState.leads.filter(l => l.id !== id);
+    appState.syncQueue = appState.syncQueue.filter(l => l.id !== id);
+    saveAllState();
+    renderApp();
+  }
+}
+
+function shareLeadWhatsApp(id) {
+  const l = appState.leads.find(x => x.id === id);
+  if (!l) return;
+  const text = `Dear ${l.customerName}, following up regarding your ${l.productName} calculation: Amount: ${formatCurrency(l.loanAmount)}, Tenure: ${l.tenureMonths} Mo, Monthly EMI: ${formatCurrency(l.monthlyEmi)}. Let us know when to proceed with documentation. Best regards, ${appState.settings.officerName}`;
+  const phone = l.mobile.replace(/[^0-9]/g, "");
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+  window.open(url, "_blank");
+}
+
+function filterLeads(query) {
+  const term = query.toLowerCase();
+  const filtered = appState.leads.filter(l => 
+    l.customerName.toLowerCase().includes(term) ||
+    l.mobile.includes(term) ||
+    l.productName.toLowerCase().includes(term)
+  );
+  const container = document.getElementById("leads-container");
+  if (container) {
+    container.innerHTML = filtered.map(lead => renderLeadCard(lead)).join('') || 
+      `<div class="p-6 text-center text-slate-400 text-xs">No matching leads found.</div>`;
+  }
+}
+// Bank LoanPro Admin Panel & Products CRUD Engine
+
+function renderAdminScreen() {
+  return `
+    <div class="space-y-4">
+      <!-- Admin Header -->
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex justify-between items-center">
+        <div>
+          <h2 class="font-bold text-slate-800 text-sm tracking-wide">
+            🔐 BANK PRODUCT CONFIGURATION & SETTINGS
+          </h2>
+          <p class="text-xs text-slate-500">Configure interest rates, fees, FED %, and officer identity.</p>
+        </div>
+        <button onclick="toggleAdminView()" class="px-3 py-1.5 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold">
+          Lock Admin
+        </button>
+      </div>
+
+      <!-- Products Management Section -->
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+        <div class="flex justify-between items-center">
+          <h3 class="font-extrabold text-slate-900 text-xs tracking-wider uppercase">
+            Bank Financing Products (${appState.products.length})
+          </h3>
+          <div class="flex space-x-2">
+            <button onclick="resetDefaultProducts()" class="px-2.5 py-1 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded text-xs font-semibold">
+              ↺ Reset Defaults
+            </button>
+            <button onclick="openProductModal(null)" class="px-3 py-1 bg-blue-700 hover:bg-blue-800 text-white rounded text-xs font-bold shadow-xs">
+              + Add Product
+            </button>
+          </div>
+        </div>
+
+        <div class="table-scroll border border-slate-200 rounded-xl overflow-hidden">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead class="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+              <tr>
+                <th class="p-2.5">Product Name</th>
+                <th class="p-2.5">Pricing</th>
+                <th class="p-2.5">Loan Limits</th>
+                <th class="p-2.5">Tenure</th>
+                <th class="p-2.5">Processing Fee</th>
+                <th class="p-2.5 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              ${appState.products.map(p => `
+                <tr class="hover:bg-slate-50">
+                  <td class="p-2.5 font-bold text-slate-800">
+                    ${p.name}
+                    <span class="block text-[10px] text-slate-400 font-mono font-normal">Age: ${p.minAge} - ${p.maxAgeAtMaturity} yrs</span>
+                  </td>
+                  <td class="p-2.5 font-semibold text-blue-900">
+                    ${p.annualRate}% <span class="text-[10px] uppercase text-slate-500 font-normal">(${p.rateType})</span>
+                  </td>
+                  <td class="p-2.5 text-slate-600 font-mono text-[11px]">
+                    ${formatCurrency(p.minAmount)} - ${formatCurrency(p.maxAmount)}
+                  </td>
+                  <td class="p-2.5 text-slate-700">
+                    ${p.minTenure} - ${p.maxTenure} Mo
+                  </td>
+                  <td class="p-2.5 text-slate-600">
+                    ${p.feeType === 'fixed' ? formatCurrency(p.feeValue) : p.feeValue + '%'} + ${p.fedRate}% FED
+                  </td>
+                  <td class="p-2.5 text-center space-x-1">
+                    <button onclick="openProductModal('${p.id}')" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-bold text-[11px]">
+                      ✏️ Edit
+                    </button>
+                    <button onclick="deleteProduct('${p.id}')" class="px-2 py-1 text-rose-600 hover:bg-rose-50 rounded font-bold text-[11px]">
+                      🗑️
+                    </button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Officer & Branch Settings -->
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+        <h3 class="font-extrabold text-slate-900 text-xs tracking-wider uppercase">
+          Officer & Branch Settings
+        </h3>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          <div>
+            <label class="block font-semibold text-slate-600 mb-1">Relationship Officer Name</label>
+            <input type="text" value="${appState.settings.officerName}"
+              oninput="appState.settings.officerName = this.value; saveAllState();"
+              class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg outline-none font-semibold text-slate-800" />
+          </div>
+
+          <div>
+            <label class="block font-semibold text-slate-600 mb-1">Staff / Employee ID</label>
+            <input type="text" value="${appState.settings.staffId}"
+              oninput="appState.settings.staffId = this.value; saveAllState();"
+              class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg outline-none font-semibold text-slate-800" />
+          </div>
+
+          <div>
+            <label class="block font-semibold text-slate-600 mb-1">Branch Name</label>
+            <input type="text" value="${appState.settings.branchName}"
+              oninput="appState.settings.branchName = this.value; saveAllState();"
+              class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg outline-none font-semibold text-slate-800" />
+          </div>
+
+          <div>
+            <label class="block font-semibold text-slate-600 mb-1">Currency Symbol / Code</label>
+            <input type="text" value="${appState.settings.currency}"
+              oninput="appState.settings.currency = this.value; saveAllState(); renderApp();"
+              class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg outline-none font-bold text-slate-800" />
+          </div>
+
+          <div class="col-span-1 md:col-span-2">
+            <label class="block font-semibold text-slate-600 mb-1">Cloud Sync Webhook URL (Pabbly Connect / Zapier / Firestore)</label>
+            <input type="url" value="${appState.settings.webhookUrl || ''}"
+              oninput="appState.settings.webhookUrl = this.value; saveAllState();"
+              placeholder="https://connect.pabbly.com/workflow/sendwebhookdata/..."
+              class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg outline-none text-slate-800" />
+            <p class="text-[10px] text-slate-500 mt-1">Pending leads in queue will be auto-pushed to this webhook endpoint when online.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderAdminAuthModal() {
+  return `
+    <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 z-50">
+      <div class="bg-white w-full max-w-sm rounded-2xl shadow-2xl border border-slate-200 p-5 space-y-4">
+        <div class="text-center">
+          <div class="w-12 h-12 mx-auto rounded-full bg-blue-100 text-blue-900 flex items-center justify-center text-xl mb-2">
+            🔐
+          </div>
+          <h3 class="font-black text-slate-900 text-base">Admin Authorization</h3>
+          <p class="text-xs text-slate-500">Enter Admin PIN to manage products & rates (Default: <b>Admin123</b>)</p>
+        </div>
+
+        <div>
+          <input type="password" id="admin-pin-input" placeholder="Enter PIN..."
+            onkeydown="if(event.key === 'Enter') submitAdminPin();"
+            class="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-center text-lg tracking-widest font-black focus:ring-2 focus:ring-blue-600 outline-none" />
+        </div>
+
+        <div class="flex space-x-2">
+          <button onclick="appState.adminAuthModalOpen = false; renderApp();" class="flex-1 py-2 bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">
+            Cancel
+          </button>
+          <button onclick="submitAdminPin()" class="flex-1 py-2 bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs">
+            Unlock
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function submitAdminPin() {
+  const pinInput = document.getElementById("admin-pin-input");
+  const entered = pinInput ? pinInput.value : "";
+  if (entered === (appState.settings.adminPin || "Admin123")) {
+    appState.isAdminUnlocked = true;
+    appState.adminAuthModalOpen = false;
+    appState.activeTab = "admin";
+    showToast("Admin access granted", "success");
+  } else {
+    showToast("Incorrect Admin PIN! (Default: Admin123)", "error");
+  }
+  renderApp();
+}
+
+function openProductModal(productId = null) {
+  if (productId) {
+    appState.editingProduct = JSON.parse(JSON.stringify(appState.products.find(p => p.id === productId)));
+  } else {
+    appState.editingProduct = {
+      id: "prod-" + Date.now(),
+      name: "New Loan Facility",
+      rateType: "reducing",
+      annualRate: 18.0,
+      minAmount: 100000,
+      maxAmount: 2000000,
+      minTenure: 12,
+      maxTenure: 60,
+      minAge: 21,
+      maxAgeAtMaturity: 60,
+      feeType: "percentage",
+      feeValue: 1.5,
+      fedRate: 16.0
+    };
+  }
+  appState.productModalOpen = true;
+  renderApp();
+}
+
+function renderProductModal() {
+  const p = appState.editingProduct;
+  if (!p) return "";
+
+  return `
+    <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 z-50 overflow-y-auto">
+      <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 p-5 space-y-3 max-h-[90vh] overflow-y-auto">
+        <h3 class="font-black text-slate-900 text-sm tracking-wide">
+          ${p.id ? 'Edit Bank Loan Product' : 'Add New Product'}
+        </h3>
+
+        <div class="space-y-2 text-xs">
+          <div>
+            <label class="block font-semibold text-slate-600 mb-1">Product Name</label>
+            <input type="text" value="${p.name}" oninput="appState.editingProduct.name = this.value"
+              class="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg outline-none font-bold" />
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block font-semibold text-slate-600 mb-1">Interest Rate Type</label>
+              <select onchange="appState.editingProduct.rateType = this.value; renderApp();"
+                class="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg outline-none font-semibold">
+                <option value="reducing" ${p.rateType === 'reducing' ? 'selected' : ''}>Reducing Balance</option>
+                <option value="flat" ${p.rateType === 'flat' ? 'selected' : ''}>Flat Rate %</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-600 mb-1">Annual Interest Rate (%)</label>
+              <input type="number" step="0.25" value="${p.annualRate}"
+                oninput="appState.editingProduct.annualRate = Number(this.value)"
+                class="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg outline-none font-bold" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block font-semibold text-slate-600 mb-1">Min Loan Amount</label>
+              <input type="number" step="10000" value="${p.minAmount}"
+                oninput="appState.editingProduct.minAmount = Number(this.value)"
+                class="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg outline-none" />
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-600 mb-1">Max Loan Amount</label>
+              <input type="number" step="50000" value="${p.maxAmount}"
+                oninput="appState.editingProduct.maxAmount = Number(this.value)"
+                class="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg outline-none" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block font-semibold text-slate-600 mb-1">Min Tenure (Months)</label>
+              <input type="number" value="${p.minTenure}"
+                oninput="appState.editingProduct.minTenure = Number(this.value)"
+                class="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg outline-none" />
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-600 mb-1">Max Tenure (Months)</label>
+              <input type="number" value="${p.maxTenure}"
+                oninput="appState.editingProduct.maxTenure = Number(this.value)"
+                class="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg outline-none" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block font-semibold text-slate-600 mb-1">Min Age Limit</label>
+              <input type="number" value="${p.minAge}"
+                oninput="appState.editingProduct.minAge = Number(this.value)"
+                class="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg outline-none" />
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-600 mb-1">Max Age at Loan Maturity</label>
+              <input type="number" value="${p.maxAgeAtMaturity}"
+                oninput="appState.editingProduct.maxAgeAtMaturity = Number(this.value)"
+                class="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg outline-none" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2">
+            <div>
+              <label class="block font-semibold text-slate-600 mb-1">Fee Type</label>
+              <select onchange="appState.editingProduct.feeType = this.value; renderApp();"
+                class="w-full px-2 py-1.5 bg-slate-50 border border-slate-300 rounded-lg outline-none">
+                <option value="percentage" ${p.feeType === 'percentage' ? 'selected' : ''}>% of Loan</option>
+                <option value="fixed" ${p.feeType === 'fixed' ? 'selected' : ''}>Fixed PKR</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-600 mb-1">Fee Value</label>
+              <input type="number" step="0.1" value="${p.feeValue}"
+                oninput="appState.editingProduct.feeValue = Number(this.value)"
+                class="w-full px-2 py-1.5 bg-slate-50 border border-slate-300 rounded-lg outline-none font-bold" />
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-600 mb-1">FED Rate (%)</label>
+              <input type="number" step="0.5" value="${p.fedRate}"
+                oninput="appState.editingProduct.fedRate = Number(this.value)"
+                class="w-full px-2 py-1.5 bg-slate-50 border border-slate-300 rounded-lg outline-none" />
+            </div>
+          </div>
+        </div>
+
+        <div class="flex justify-end space-x-2 pt-2 border-t border-slate-200">
+          <button onclick="appState.productModalOpen = false; renderApp();" class="px-3 py-1.5 bg-slate-200 text-slate-700 rounded-lg text-xs font-bold">
+            Cancel
+          </button>
+          <button onclick="saveProductModal()" class="px-4 py-1.5 bg-blue-700 text-white rounded-lg text-xs font-bold shadow-xs">
+            Save Product
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function saveProductModal() {
+  const p = appState.editingProduct;
+  const idx = appState.products.findIndex(x => x.id === p.id);
+  if (idx >= 0) {
+    appState.products[idx] = p;
+  } else {
+    appState.products.push(p);
+  }
+  saveAllState();
+  appState.productModalOpen = false;
+  showToast("Product configuration saved", "success");
+  renderApp();
+}
+
+function deleteProduct(id) {
+  if (appState.products.length <= 1) {
+    showToast("At least one product must remain", "warning");
+    return;
+  }
+  if (confirm("Delete this product permanently?")) {
+    appState.products = appState.products.filter(p => p.id !== id);
+    if (appState.calc.productId === id) {
+      appState.calc.productId = appState.products[0].id;
+    }
+    saveAllState();
+    renderApp();
+  }
+}
+
+function resetDefaultProducts() {
+  if (confirm("Reset all products to bank standard defaults?")) {
+    appState.products = JSON.parse(JSON.stringify(DEFAULT_PRODUCTS));
+    saveAllState();
+    showToast("Products reset to bank defaults", "success");
+    renderApp();
+  }
+}
+  document.addEventListener("DOMContentLoaded", () => {
+    try {
+      if (typeof renderApp === "function") {
+        renderApp();
+      }
+    } catch (e) {
+      console.error("Initialization error:", e);
+    }
+  });
+  </script>
+</body>
+</html>

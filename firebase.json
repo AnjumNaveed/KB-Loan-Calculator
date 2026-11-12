@@ -1,0 +1,8 @@
+{
+  "firestore": [
+    {
+      "database": "ai-studio-android-kbloanca-5f0d5d03-e822-4052-b56a-dc1ece39eefb",
+      "rules": "firestore.rules"
+    }
+  ]
+}

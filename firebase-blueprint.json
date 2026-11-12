@@ -1,0 +1,110 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Bank loan facility product and pricing configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "rateType": { "type": "string", "enum": ["reducing", "flat"] },
+        "defaultAnnualRate": { "type": "number" },
+        "minAmount": { "type": "integer" },
+        "maxAmount": { "type": "integer" },
+        "minTenure": { "type": "integer" },
+        "maxTenure": { "type": "integer" },
+        "minAge": { "type": "integer" },
+        "maxAgeAtMaturity": { "type": "integer" },
+        "feeType": { "type": "string" },
+        "defaultFeeValue": { "type": "number" },
+        "fedRate": { "type": "number" },
+        "collateralDetails": { "type": "string" },
+        "rateSlabs": { "type": "array" },
+        "feeSlabs": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "rateType", "defaultAnnualRate", "minAmount", "maxAmount"]
+    },
+    "CustomerLead": {
+      "title": "CustomerLead",
+      "description": "Customer loan application record across branches",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerName": { "type": "string" },
+        "mobile": { "type": "string" },
+        "dob": { "type": "string" },
+        "age": { "type": "integer" },
+        "monthlyIncome": { "type": "integer" },
+        "dbrAllowed": { "type": "integer" },
+        "productId": { "type": "string" },
+        "productName": { "type": "string" },
+        "loanAmount": { "type": "integer" },
+        "tenureMonths": { "type": "integer" },
+        "monthlyEmi": { "type": "integer" },
+        "totalProfit": { "type": "integer" },
+        "processingFee": { "type": "integer" },
+        "status": { "type": "string" },
+        "notes": { "type": "string" },
+        "followUpDate": { "type": "string" },
+        "officerName": { "type": "string" },
+        "officerId": { "type": "string" },
+        "branchName": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "customerName", "mobile", "loanAmount", "monthlyEmi", "userId"]
+    },
+    "SystemConfig": {
+      "title": "SystemConfig",
+      "description": "Global bank configurations like FED rate, currency, and Admin security password",
+      "type": "object",
+      "properties": {
+        "fedRate": { "type": "number" },
+        "currency": { "type": "string" },
+        "adminPin": { "type": "string" },
+        "adminBroadcastMessage": { "type": "string" },
+        "adminBroadcastId": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fedRate", "currency", "adminPin"]
+    },
+    "RegisteredUser": {
+      "title": "RegisteredUser",
+      "description": "Registered officer or relationship manager profile, branch assignment, and app access status",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "officerName": { "type": "string" },
+        "staffId": { "type": "string" },
+        "branchName": { "type": "string" },
+        "allowedSupervisorBranch": { "type": "string" },
+        "canUseSupervisorFilter": { "type": "boolean" },
+        "isBlocked": { "type": "boolean" },
+        "role": { "type": "string" },
+        "updatedAt": { "type": "integer" }
+      },
+      "required": ["uid", "officerName", "staffId", "branchName"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Synchronized loan facilities and interest/fee rate slabs"
+    },
+    "/leads/{leadId}": {
+      "schema": { "$ref": "#/entities/CustomerLead" },
+      "description": "Synchronized branch customer leads"
+    },
+    "/config/{configId}": {
+      "schema": { "$ref": "#/entities/SystemConfig" },
+      "description": "Global settings and configuration"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/RegisteredUser" },
+      "description": "User access control and branch monitoring permissions"
+    }
+  }
+}

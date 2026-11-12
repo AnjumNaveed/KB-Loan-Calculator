@@ -1,0 +1,25 @@
+{
+  "name": "KB Loan Calculator & Lead CRM",
+  "short_name": "KB Calc",
+  "description": "Bank Loan & Deposit Calculator with Lead Management and Google Sheets Offline Sync",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F8FAFC",
+  "theme_color": "#1E3A8A",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192' width='192' height='192'%3E%3Crect width='192' height='192' rx='42' fill='%231E3A8A'/%3E%3Cpath d='M96 38L42 70v14h108V70L96 38zm-44 54h18v52H52V92zm36 0h18v52H88V92zm36 0h18v52h-18V92zM36 150v14h120v-14H36z' fill='%23FBBF24'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512' width='512' height='512'%3E%3Crect width='512' height='512' rx='112' fill='%231E3A8A'/%3E%3Cpath d='M256 96L112 184v36h288v-36L256 96zm-116 144h48v140h-48V240zm96 0h48v140h-48V240zm96 0h48v140h-48V240zM96 396v36h320v-36H96z' fill='%23FBBF24'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

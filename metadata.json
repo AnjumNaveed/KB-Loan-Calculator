@@ -1,0 +1,6 @@
+{
+  "name": "KB Loan Calculator",
+  "description": "KB Loan Calculator - Bank Loan Calculator & Lead Management Mobile App with DBR eligibility matrix, row-level early payment amortization, and lead synchronization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

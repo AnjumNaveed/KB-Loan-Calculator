@@ -1,0 +1,2169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0f172a" />
+  <title>KB Loan Calculator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bankNavy: '#0f172a',
+            bankBlue: '#1e3a8a',
+            bankGold: '#d97706'
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    :root {
+      --primary: #1e3a8a;
+      --primary-dark: #0f172a;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    input, select, textarea {
+      user-select: auto;
+    }
+    .table-scroll {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.05); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .animate-pulse-alarm {
+      animation: pulse-ring 1.8s infinite ease-in-out;
+    }
+    @media print {
+      body { background: #fff !important; color: #000 !important; }
+      .no-print, header, nav, button, .modal-backdrop { display: none !important; }
+      .print-only { display: block !important; }
+      .modal-container { position: static !important; width: 100% !important; max-width: 100% !important; box-shadow: none !important; border: none !important; }
+      table { width: 100% !important; border-collapse: collapse !important; }
+      th, td { border: 1px solid #ddd !important; padding: 6px !important; font-size: 10pt !important; }
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased min-h-screen">
+  <div id="app-root"></div>
+  <div id="toast-banner" class="hidden"></div>
+
+  <script>
+    // --- 1. DEFAULT DATA & STORAGE ---
+    const DEFAULT_PRODUCTS = [
+      {
+        id: "prod-kb-personal",
+        name: "KB Personal Finance (Salaried)",
+        rateType: "reducing",
+        defaultAnnualRate: 24.0,
+        minAmount: 50000,
+        maxAmount: 3000000,
+        minTenure: 1,
+        maxTenure: 120,
+        minAge: 21,
+        maxAgeAtMaturity: 60,
+        feeType: "percentage",
+        defaultFeeValue: 1.5,
+        rateSlabs: [
+          { minAmount: 50000, maxAmount: 200000, annualRate: 34.0 },
+          { minAmount: 200001, maxAmount: 1000000, annualRate: 28.0 },
+          { minAmount: 1000001, maxAmount: 3000000, annualRate: 24.0 }
+        ],
+        feeSlabs: [
+          { minAmount: 50000, maxAmount: 500000, feeType: "whichever_higher", feeValue: 1.5, minFee: 3500, maxFee: 7500 },
+          { minAmount: 500001, maxAmount: 3000000, feeType: "percentage", feeValue: 1.25, minFee: 7500, maxFee: 25000 }
+        ]
+      },
+      {
+        id: "prod-kb-auto",
+        name: "KB Auto Car Finance",
+        rateType: "reducing",
+        defaultAnnualRate: 19.5,
+        minAmount: 200000,
+        maxAmount: 10000000,
+        minTenure: 1,
+        maxTenure: 120,
+        minAge: 21,
+        maxAgeAtMaturity: 65,
+        feeType: "fixed",
+        defaultFeeValue: 8500,
+        rateSlabs: [
+          { minAmount: 200000, maxAmount: 2000000, annualRate: 21.0 },
+          { minAmount: 2000001, maxAmount: 10000000, annualRate: 19.5 }
+        ],
+        feeSlabs: [
+          { minAmount: 200000, maxAmount: 10000000, feeType: "whichever_higher", feeValue: 1.0, minFee: 8500, maxFee: 25000 }
+        ]
+      },
+      {
+        id: "prod-kb-home",
+        name: "KB Home Mortgage Financing",
+        rateType: "reducing",
+        defaultAnnualRate: 16.5,
+        minAmount: 500000,
+        maxAmount: 50000000,
+        minTenure: 1,
+        maxTenure: 120,
+        minAge: 25,
+        maxAgeAtMaturity: 65,
+        feeType: "percentage",
+        defaultFeeValue: 0.5,
+        rateSlabs: [
+          { minAmount: 500000, maxAmount: 5000000, annualRate: 18.0 },
+          { minAmount: 5000001, maxAmount: 50000000, annualRate: 16.5 }
+        ],
+        feeSlabs: [
+          { minAmount: 500000, maxAmount: 50000000, feeType: "whichever_higher", feeValue: 0.5, minFee: 10000, maxFee: 50000 }
+        ]
+      },
+      {
+        id: "prod-kb-sme",
+        name: "KB Fast SME Commercial Loan",
+        rateType: "flat",
+        defaultAnnualRate: 15.0,
+        minAmount: 50000,
+        maxAmount: 5000000,
+        minTenure: 1,
+        maxTenure: 60,
+        minAge: 21,
+        maxAgeAtMaturity: 62,
+        feeType: "fixed",
+        defaultFeeValue: 4000,
+        rateSlabs: [
+          { minAmount: 50000, maxAmount: 100000, annualRate: 39.0 },
+          { minAmount: 100001, maxAmount: 300000, annualRate: 37.0 },
+          { minAmount: 300001, maxAmount: 5000000, annualRate: 36.0 }
+        ],
+        feeSlabs: [
+          { minAmount: 50000, maxAmount: 200000, feeType: "whichever_higher", feeValue: 1.0, minFee: 3500, maxFee: 6000 },
+          { minAmount: 200001, maxAmount: 5000000, feeType: "whichever_higher", feeValue: 2.5, minFee: 4000, maxFee: 8000 }
+        ]
+      }
+    ];
+
+    const DEFAULT_PROFILE = {
+      officerName: "",
+      staffId: "",
+      branchName: "",
+      isOnboarded: false,
+      adminPin: "Admin123",
+      currency: "PKR",
+      fedRate: 16.0
+    };
+
+    const DEFAULT_LEADS = [];
+
+    function getCloudServerDatabase() {
+      try {
+        return JSON.parse(localStorage.getItem("kb_cloud_server_db") || "{}");
+      } catch (e) {
+        return {};
+      }
+    }
+    function saveCloudServerDatabase(db) {
+      localStorage.setItem("kb_cloud_server_db", JSON.stringify(db));
+    }
+
+    window.appState = {
+      activeTab: "calc", // calc, leads, admin
+      online: navigator.onLine,
+      profile: JSON.parse(localStorage.getItem("kb_profile") || "null") || DEFAULT_PROFILE,
+      products: JSON.parse(localStorage.getItem("kb_products") || "null") || DEFAULT_PRODUCTS,
+      leads: JSON.parse(localStorage.getItem("kb_leads") || "null") || DEFAULT_LEADS,
+      syncQueue: JSON.parse(localStorage.getItem("kb_sync_queue") || "[]"),
+      isAdminUnlocked: false,
+
+      // Search & Filters in Leads tab
+      leadFilterStatus: "All",
+      leadSearchQuery: "",
+      leadSupervisorBranch: "",
+
+      // Calculator Form Inputs - Follow-Up Date REMOVED from calculator screen
+      calc: {
+        customerName: "",
+        mobile: "",
+        dob: "",
+        specificNotes: "",
+        loanAmountInput: "",
+        productId: "prod-kb-personal",
+        monthlyIncomeInput: "",
+        allowedDbrInput: "",
+        selectedTenure: 36,
+        matrixTenureFilter: "All"
+      },
+
+      // Amortization modal
+      showAmortization: false,
+      extraPayments: {},
+      prepaymentMode: "reduce_emi",
+
+      // Dialog modals
+      showOnboarding: false,
+      showProfileDialog: false,
+      showAdminAuth: false,
+      showChangePassword: false,
+      showProductEdit: false,
+      editingProduct: null,
+      editingLeadNote: null,
+      assignFollowUpLead: null // specifically holds { id, customerName, followUpDate }
+    };
+
+    function resetAllInputs() {
+      appState.calc.customerName = "";
+      appState.calc.mobile = "";
+      appState.calc.dob = "";
+      appState.calc.specificNotes = "";
+      appState.calc.loanAmountInput = "";
+      appState.calc.monthlyIncomeInput = "";
+      appState.calc.allowedDbrInput = "";
+      appState.calc.selectedTenure = 36;
+      appState.extraPayments = {};
+      appState.prepaymentMode = "reduce_emi";
+      showToast("All input fields cleared back to blank", "info");
+      renderApp();
+    }
+
+    function saveState() {
+      localStorage.setItem("kb_profile", JSON.stringify(appState.profile));
+      localStorage.setItem("kb_products", JSON.stringify(appState.products));
+      localStorage.setItem("kb_leads", JSON.stringify(appState.leads));
+      localStorage.setItem("kb_sync_queue", JSON.stringify(appState.syncQueue));
+
+      const cloudDb = getCloudServerDatabase();
+      cloudDb.globalProducts = appState.products;
+      if (appState.profile.staffId) {
+        cloudDb.officerLeads = cloudDb.officerLeads || {};
+        cloudDb.officerLeads[appState.profile.staffId] = appState.leads;
+      }
+      saveCloudServerDatabase(cloudDb);
+    }
+
+    function autoFetchGlobalProducts() {
+      const cloudDb = getCloudServerDatabase();
+      if (cloudDb.globalProducts && Array.isArray(cloudDb.globalProducts) && cloudDb.globalProducts.length > 0) {
+        appState.products = cloudDb.globalProducts;
+        localStorage.setItem("kb_products", JSON.stringify(appState.products));
+      }
+    }
+
+    function restoreCloudBackupForOfficer(staffId) {
+      if (!staffId) return;
+      const cloudDb = getCloudServerDatabase();
+      if (cloudDb.officerLeads && cloudDb.officerLeads[staffId]) {
+        const restored = cloudDb.officerLeads[staffId];
+        appState.leads = restored;
+        localStorage.setItem("kb_leads", JSON.stringify(appState.leads));
+        showToast(`Restored ${restored.length} cloud-saved leads for Employee ID: ${staffId}`, "success");
+      }
+    }
+
+    // --- 2. AUDIO CHIME & NOTIFICATION SYSTEM ---
+    function triggerAlarmChime() {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const now = ctx.currentTime;
+        const osc1 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        osc1.type = "sine";
+        osc1.frequency.setValueAtTime(784, now);
+        gain1.gain.setValueAtTime(0.3, now);
+        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        osc1.connect(gain1);
+        gain1.connect(ctx.destination);
+        osc1.start(now);
+        osc1.stop(now + 0.35);
+
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.type = "sine";
+        osc2.frequency.setValueAtTime(1046.5, now + 0.15);
+        gain2.gain.setValueAtTime(0.3, now + 0.15);
+        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.start(now + 0.15);
+        osc2.stop(now + 0.55);
+      } catch (e) {}
+    }
+
+    function checkFollowUpReminders() {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const dueLeads = appState.leads.filter(l => l.followUpDate && l.followUpDate <= todayStr && l.status !== "Lost" && l.status !== "Converted");
+      if (dueLeads.length > 0 && !window._alarmTriggeredThisSession) {
+        window._alarmTriggeredThisSession = true;
+        triggerAlarmChime();
+        if ("Notification" in window && Notification.permission === "granted") {
+          try {
+            new Notification("KB Loan Follow-Up Reminder", {
+              body: `You have ${dueLeads.length} customer lead(s) scheduled for follow-up today!`,
+              icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><text y='20' font-size='20'>⏰</text></svg>"
+            });
+          } catch (e) {}
+        }
+      }
+      return dueLeads;
+    }
+
+    // --- 3. INTELLIGENT FINANCIAL & SLABS ENGINE ---
+    function formatForWhatsApp(input) {
+      if (!input) return "";
+      const digits = input.replace(/\D/g, "");
+      if (digits.startsWith("03") && digits.length === 11) return "92" + digits.substring(1);
+      if (digits.startsWith("3") && digits.length === 10) return "92" + digits;
+      if (digits.startsWith("92")) return digits;
+      return digits;
+    }
+
+    function calculateDetailedAge(dobString) {
+      if (!dobString) return { years: 0, months: 0, days: 0, text: "", urduText: "" };
+      const parts = dobString.split("-").map(Number);
+      if (parts.length !== 3 || isNaN(parts[0])) return { years: 0, months: 0, days: 0, text: "", urduText: "" };
+      const dob = new Date(parts[0], parts[1] - 1, parts[2]);
+      const now = new Date();
+      if (now < dob) return { years: 0, months: 0, days: 0, text: "", urduText: "" };
+      let years = now.getFullYear() - dob.getFullYear();
+      let months = now.getMonth() - dob.getMonth();
+      let days = now.getDate() - dob.getDate();
+
+      if (days < 0) {
+        months--;
+        const prevMonthLastDay = new Date(now.getFullYear(), now.getMonth(), 0).getDate();
+        days += prevMonthLastDay;
+      }
+      if (months < 0) {
+        years--;
+        months += 12;
+      }
+      const y = Math.max(0, years);
+      const m = Math.max(0, months);
+      const d = Math.max(0, days);
+      return {
+        years: y,
+        months: m,
+        days: d,
+        text: `${y} Years, ${m} Months, ${d} Days`,
+        urduText: `${y} سال، ${m} ماہ، ${d} دن`
+      };
+    }
+
+    function calculateAge(dobString) {
+      return calculateDetailedAge(dobString).years;
+    }
+
+    function formatCurrency(amt) {
+      const cur = (appState.profile && appState.profile.currency) || "PKR";
+      return cur + " " + Math.round(Number(amt || 0)).toLocaleString("en-US");
+    }
+
+    function getSelectedProduct() {
+      return appState.products.find(p => p.id === appState.calc.productId) || appState.products[0];
+    }
+
+    function getApplicableRate(product, amount) {
+      if (amount > 0 && product.rateSlabs && product.rateSlabs.length > 0) {
+        const slab = product.rateSlabs.find(s => amount >= s.minAmount && amount <= s.maxAmount);
+        if (slab) return Number(slab.annualRate);
+      }
+      return Number(product.defaultAnnualRate);
+    }
+
+    function calculateFee(product, principal) {
+      let baseFee = 0;
+      const fedRate = (appState.profile && appState.profile.fedRate) || 16.0;
+
+      if (principal > 0 && product.feeSlabs && product.feeSlabs.length > 0) {
+        const slab = product.feeSlabs.find(s => principal >= s.minAmount && principal <= s.maxAmount);
+        if (slab) {
+          if (slab.feeType === "fixed") {
+            baseFee = Number(slab.feeValue);
+          } else if (slab.feeType === "whichever_higher") {
+            const pctFee = (principal * Number(slab.feeValue)) / 100;
+            const minF = Number(slab.minFee) || 0;
+            baseFee = Math.max(pctFee, minF);
+            if (slab.maxFee && Number(slab.maxFee) > 0) {
+              baseFee = Math.min(baseFee, Number(slab.maxFee));
+            }
+          } else {
+            const pctFee = (principal * Number(slab.feeValue)) / 100;
+            baseFee = pctFee;
+            if (slab.minFee && Number(slab.minFee) > 0) baseFee = Math.max(baseFee, Number(slab.minFee));
+            if (slab.maxFee && Number(slab.maxFee) > 0) baseFee = Math.min(baseFee, Number(slab.maxFee));
+          }
+        }
+      }
+
+      if (baseFee === 0 && principal > 0) {
+        if (product.feeType === "fixed") {
+          baseFee = Number(product.defaultFeeValue);
+        } else {
+          baseFee = (principal * Number(product.defaultFeeValue)) / 100;
+        }
+      }
+
+      const fedAmount = (baseFee * fedRate) / 100;
+      return {
+        baseFee: Math.round(baseFee),
+        fedAmount: Math.round(fedAmount),
+        totalFee: Math.round(baseFee + fedAmount)
+      };
+    }
+
+    function calculateEmi(principal, annualRate, tenureMonths, rateType) {
+      if (tenureMonths <= 0 || principal <= 0) return { emi: 0, totalProfit: 0, totalPayable: 0 };
+      if (rateType === "flat") {
+        const totalProfit = principal * (annualRate / 100) * (tenureMonths / 12);
+        const totalPayable = principal + totalProfit;
+        return { emi: Math.round(totalPayable / tenureMonths), totalProfit: Math.round(totalProfit), totalPayable: Math.round(totalPayable) };
+      } else {
+        const r = (annualRate / 100) / 12;
+        if (r === 0) return { emi: Math.round(principal / tenureMonths), totalProfit: 0, totalPayable: principal };
+        const factor = Math.pow(1 + r, tenureMonths);
+        const emi = Math.round((principal * r * factor) / (factor - 1));
+        const totalPayable = emi * tenureMonths;
+        return { emi, totalProfit: totalPayable - principal, totalPayable };
+      }
+    }
+
+    function computePrincipalFromEmi(emi, annualRate, tenureMonths, rateType) {
+      if (rateType === "flat") {
+        const totalAllowable = emi * tenureMonths;
+        const factor = 1 + ((annualRate / 100) * (tenureMonths / 12));
+        return Math.round(totalAllowable / factor);
+      } else {
+        const r = (annualRate / 100) / 12;
+        if (r === 0) return emi * tenureMonths;
+        const factor = Math.pow(1 + r, tenureMonths);
+        return Math.round((emi * (factor - 1)) / (r * factor));
+      }
+    }
+
+    function calculateMaxLoanAmount(product, netIncome, dbrPercent, tenureMonths) {
+      const maxEmiAllowed = (netIncome * dbrPercent) / 100;
+      if (maxEmiAllowed <= 0 || tenureMonths <= 0) return 0;
+      let rate = Number(product.defaultAnnualRate || 20);
+      let principal = computePrincipalFromEmi(maxEmiAllowed, rate, tenureMonths, product.rateType);
+      const appRate = getApplicableRate(product, principal);
+      if (appRate !== rate) {
+        rate = appRate;
+        principal = computePrincipalFromEmi(maxEmiAllowed, rate, tenureMonths, product.rateType);
+      }
+      let rounded = Math.floor(principal / 1000) * 1000;
+      while (rounded > 0) {
+        const checkRate = getApplicableRate(product, rounded);
+        const emi = calculateEmi(rounded, checkRate, tenureMonths, product.rateType).emi;
+        if (emi <= maxEmiAllowed) break;
+        rounded -= 1000;
+      }
+      return Math.max(0, rounded);
+    }
+
+    function getPrincipalForTenure(tenure) {
+      const raw = (appState.calc.loanAmountInput || "").replace(/\D/g, "");
+      const num = Number(raw);
+      if (num > 0) return num;
+      const p = getSelectedProduct();
+      const inc = Number(appState.calc.monthlyIncomeInput) || 100000;
+      const dbr = Number(appState.calc.allowedDbrInput) || 40;
+      return calculateMaxLoanAmount(p, inc, dbr, tenure);
+    }
+
+    function generateInteractiveSchedule(principal, annualRate, tenureMonths, rateType, extraPayments = {}, mode = "reduce_emi") {
+      const origEmiResult = calculateEmi(principal, annualRate, tenureMonths, rateType);
+      let targetEmi = origEmiResult.emi;
+      const list = [];
+      let balance = principal;
+      const monthlyRate = (annualRate / 100) / 12;
+      const cal = new Date();
+      let revisedTotalProfit = 0;
+      let totalExtraPaid = 0;
+
+      for (let m = 1; m <= tenureMonths; m++) {
+        if (balance <= 0) break;
+        const dueDate = new Date(cal.getFullYear(), cal.getMonth() + m, 1);
+        const dateStr = dueDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+        const profitPart = Math.round(balance * monthlyRate);
+        revisedTotalProfit += profitPart;
+
+        const stdPrincipal = Math.max(0, targetEmi - profitPart);
+        const actualPrincipal = Math.min(balance, stdPrincipal);
+        const extra = Number(extraPayments[m]) || 0;
+        totalExtraPaid += extra;
+
+        const totalPrincipalPaid = Math.min(balance, actualPrincipal + extra);
+        const emiThisMonth = totalPrincipalPaid + profitPart;
+        const closing = Math.max(0, balance - totalPrincipalPaid);
+
+        list.push({
+          month: m,
+          dueDate: dateStr,
+          opening: Math.round(balance),
+          principal: actualPrincipal,
+          profit: profitPart,
+          emi: emiThisMonth,
+          extra: extra,
+          closing: closing
+        });
+        balance = closing;
+
+        if (mode === "reduce_emi" && extra > 0 && balance > 0 && m < tenureMonths) {
+          const remainingMonths = tenureMonths - m;
+          const recalculated = calculateEmi(balance, annualRate, remainingMonths, rateType);
+          targetEmi = recalculated.emi;
+        }
+      }
+
+      return {
+        rows: list,
+        summary: {
+          mode: mode,
+          originalProfit: origEmiResult.totalProfit,
+          revisedProfit: revisedTotalProfit,
+          profitSaved: Math.max(0, origEmiResult.totalProfit - revisedTotalProfit),
+          originalTenure: tenureMonths,
+          revisedTenure: list.length,
+          monthsSaved: Math.max(0, tenureMonths - list.length),
+          originalEmi: origEmiResult.emi,
+          revisedEmi: mode === "reduce_emi" ? targetEmi : origEmiResult.emi,
+          totalExtraPaid: totalExtraPaid
+        }
+      };
+    }
+
+    // --- 4. LEAD CREATION & AUTO-SYNC ---
+    function autoSaveLead(triggerSource = "Auto") {
+      const custName = appState.calc.customerName.trim() || `Client (${appState.calc.mobile || "Walk-in"})`;
+      const p = getSelectedProduct();
+      const tenure = appState.calc.selectedTenure;
+      const principal = getPrincipalForTenure(tenure);
+      const rate = getApplicableRate(p, principal);
+      const emiRes = calculateEmi(principal, rate, tenure, p.rateType);
+      const feeRes = calculateFee(p, principal);
+
+      const newLead = {
+        id: "kb-" + Date.now() + "-" + Math.random().toString(36).substring(2, 6),
+        customerName: custName,
+        mobile: appState.calc.mobile || "",
+        dob: appState.calc.dob || "",
+        followUpDate: "", // starts empty; assigned specifically on leads screen
+        age: calculateAge(appState.calc.dob),
+        monthlyIncome: Number(appState.calc.monthlyIncomeInput) || 0,
+        dbrAllowed: Number(appState.calc.allowedDbrInput) || 0,
+        productId: p.id,
+        productName: p.name,
+        loanAmount: principal,
+        tenureMonths: tenure,
+        monthlyEmi: emiRes.emi,
+        totalProfit: emiRes.totalProfit,
+        processingFee: feeRes.totalFee,
+        status: "New",
+        notes: appState.calc.specificNotes || `Lead captured via ${triggerSource}`,
+        officerName: appState.profile.officerName || "Muhammad Usman",
+        officerId: appState.profile.staffId || "RO-8942",
+        branchName: appState.profile.branchName || "Main Branch",
+        createdAt: Date.now(),
+        syncStatus: appState.online ? "synced" : "pending_sync"
+      };
+
+      appState.leads.unshift(newLead);
+      if (!appState.online) appState.syncQueue.push(newLead);
+      saveState();
+      showToast(`Lead saved to database (${triggerSource})`, "success");
+      renderApp();
+      return newLead;
+    }
+
+    function updateLeadStatus(id, newStatus) {
+      const item = appState.leads.find(x => x.id === id);
+      if (item) {
+        item.status = newStatus;
+        saveState();
+        showToast(`Lead status updated to ${newStatus}`, "info");
+        renderApp();
+      }
+    }
+
+    // Modal to assign follow-up date to a specific customer
+    function openAssignFollowUpModal(leadId) {
+      const lead = appState.leads.find(x => x.id === leadId);
+      if (lead) {
+        appState.assignFollowUpLead = {
+          id: lead.id,
+          customerName: lead.customerName,
+          followUpDate: lead.followUpDate || new Date().toISOString().slice(0, 10)
+        };
+        renderApp();
+      }
+    }
+
+    function saveAssignedFollowUpDate() {
+      if (!appState.assignFollowUpLead) return;
+      const lead = appState.leads.find(x => x.id === appState.assignFollowUpLead.id);
+      if (lead) {
+        lead.followUpDate = appState.assignFollowUpLead.followUpDate;
+        saveState();
+        showToast(`Follow-up date assigned for ${lead.customerName}`, "success");
+      }
+      appState.assignFollowUpLead = null;
+      renderApp();
+    }
+
+    function clearLeadFollowUpDate(id) {
+      const lead = appState.leads.find(x => x.id === id);
+      if (lead) {
+        lead.followUpDate = "";
+        saveState();
+        showToast(`Follow-up date cleared for ${lead.customerName}`, "info");
+      }
+      appState.assignFollowUpLead = null;
+      renderApp();
+    }
+
+    function openEditNoteModal(id) {
+      const item = appState.leads.find(x => x.id === id);
+      if (item) {
+        appState.editingLeadNote = { id: item.id, notes: item.notes || "" };
+        renderApp();
+      }
+    }
+
+    function saveEditedNote() {
+      if (!appState.editingLeadNote) return;
+      const item = appState.leads.find(x => x.id === appState.editingLeadNote.id);
+      if (item) {
+        item.notes = appState.editingLeadNote.notes;
+        saveState();
+        showToast("Lead notes updated & synced to server", "success");
+      }
+      appState.editingLeadNote = null;
+      renderApp();
+    }
+
+    function openEditPlanModal(id) {
+      const item = appState.leads.find(x => x.id === id);
+      if (item) {
+        appState.editingLeadPlan = {
+          id: item.id,
+          customerName: item.customerName,
+          productId: item.productId,
+          loanAmount: item.loanAmount,
+          tenureMonths: item.tenureMonths
+        };
+        renderApp();
+      }
+    }
+
+    function saveEditedPlan() {
+      if (!appState.editingLeadPlan) return;
+      const item = appState.leads.find(x => x.id === appState.editingLeadPlan.id);
+      if (item) {
+        const prod = appState.products.find(p => p.id === appState.editingLeadPlan.productId) || appState.products[0];
+        const amount = Number(appState.editingLeadPlan.loanAmount) || item.loanAmount;
+        const tenure = Number(appState.editingLeadPlan.tenureMonths) || item.tenureMonths;
+        const rate = getApplicableRate(prod, amount);
+        const emiRes = calculateEmi(amount, rate, tenure, prod.rateType);
+        const feeRes = calculateFee(prod, amount);
+
+        item.productId = prod.id;
+        item.productName = prod.name;
+        item.loanAmount = amount;
+        item.tenureMonths = tenure;
+        item.monthlyEmi = emiRes.emi;
+        item.totalProfit = emiRes.totalProfit;
+        item.processingFee = feeRes.totalFee;
+
+        saveState();
+        showToast("Lead loan terms revised & pipeline updated", "success");
+      }
+      appState.editingLeadPlan = null;
+      renderApp();
+    }
+
+    function deleteLead(id) {
+      if (confirm("Are you sure you want to permanently delete this customer lead?")) {
+        appState.leads = appState.leads.filter(x => x.id !== id);
+        saveState();
+        showToast("Lead permanently deleted", "info");
+        renderApp();
+      }
+    }
+
+    function clearAllLeads() {
+      if (confirm("Warning: Permanently delete ALL customer leads? This cannot be undone.")) {
+        appState.leads = [];
+        saveState();
+        showToast("All leads cleared from database", "warning");
+        renderApp();
+      }
+    }
+
+    function exportProductsCsv() {
+      let csv = "ID,Name,RateType,DefaultRate,MinAmount,MaxAmount,MinTenure,MaxTenure,MinAge,MaxAgeAtMaturity,FeeType,FeeValue\n";
+      appState.products.forEach(p => {
+        csv += `"${p.id}","${p.name}","${p.rateType}",${p.defaultAnnualRate},${p.minAmount},${p.maxAmount},${p.minTenure},${p.maxTenure},${p.minAge},${p.maxAgeAtMaturity},"${p.feeType}",${p.defaultFeeValue}\n`;
+      });
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "kb_loan_products.csv";
+      link.click();
+      URL.revokeObjectURL(url);
+      showToast("Products CSV file downloaded", "success");
+    }
+
+    function importProductsCsv(csvText) {
+      if (!csvText || !csvText.trim()) return showToast("CSV text is empty", "warning");
+      try {
+        const lines = csvText.trim().split("\n").map(l => l.trim()).filter(l => l.length > 0);
+        if (lines.length <= 1) return showToast("CSV must contain a header and at least one row", "warning");
+        const startIndex = (lines[0].toLowerCase().startsWith("id") || lines[0].toLowerCase().startsWith('"id')) ? 1 : 0;
+        const newProducts = [];
+        for (let i = startIndex; i < lines.length; i++) {
+          const tokens = lines[i].split(",").map(t => t.replace(/"/g, "").trim());
+          if (tokens.length >= 8) {
+            newProducts.push({
+              id: tokens[0] || "prod-" + Date.now() + "-" + i,
+              name: tokens[1] || "Loan Facility " + i,
+              rateType: (tokens[2] && tokens[2].toLowerCase().includes("flat")) ? "flat" : "reducing",
+              defaultAnnualRate: Number(tokens[3]) || 20.0,
+              minAmount: Number(tokens[4]) || 50000,
+              maxAmount: Number(tokens[5]) || 5000000,
+              minTenure: Number(tokens[6]) || 1,
+              maxTenure: Number(tokens[7]) || 120,
+              minAge: Number(tokens[8]) || 21,
+              maxAgeAtMaturity: Number(tokens[9]) || 65,
+              feeType: (tokens[10] && tokens[10].toLowerCase().includes("fixed")) ? "fixed" : "percentage",
+              defaultFeeValue: Number(tokens[11]) || 1.5,
+              fedRate: 16.0,
+              rateSlabs: [],
+              feeSlabs: []
+            });
+          }
+        }
+        if (newProducts.length === 0) return showToast("No valid products parsed from CSV", "error");
+        appState.products = newProducts;
+        appState.calc.productId = newProducts[0].id;
+        saveState();
+        showToast(`Imported ${newProducts.length} loan products!`, "success");
+        appState.showBulkImportModal = false;
+        renderApp();
+      } catch (e) {
+        showToast("CSV import error: " + e.message, "error");
+      }
+    }
+
+    function shareViaWhatsApp() {
+      autoSaveLead("WhatsApp");
+      const p = getSelectedProduct();
+      const tenure = appState.calc.selectedTenure;
+      const principal = getPrincipalForTenure(tenure);
+      const rate = getApplicableRate(p, principal);
+      const emiRes = calculateEmi(principal, rate, tenure, p.rateType);
+      const fee = calculateFee(p, principal);
+
+      const text = `🏛️ *KB LOAN FINANCING PROPOSAL*
+━━━━━━━━━━━━━━━━━━━━
+👤 *Customer:* ${appState.calc.customerName || "Valued Client"}
+📱 *Mobile:* ${appState.calc.mobile || "N/A"}
+📋 *Facility:* ${p.name}
+💰 *Loan Principal:* ${formatCurrency(principal)}
+📅 *Tenure:* ${tenure} Months (${(tenure/12).toFixed(1)} Yrs)
+📊 *Profit Rate:* ${rate}% (${p.rateType.toUpperCase()})
+━━━━━━━━━━━━━━━━━━━━
+💵 *Monthly Installment (EMI):* ${formatCurrency(emiRes.emi)}
+🧾 *Processing Fee + FED (${appState.profile.fedRate}%):* ${formatCurrency(fee.totalFee)}
+📈 *Total Profit / Mark-up:* ${formatCurrency(emiRes.totalProfit)}
+💳 *Total Repayment:* ${formatCurrency(emiRes.totalPayable)}
+━━━━━━━━━━━━━━━━━━━━
+🏦 *Officer:* ${appState.profile.officerName} (${appState.profile.staffId})
+📍 *Branch:* ${appState.profile.branchName}
+*Note:* Subject to credit approval & bank regulations.`;
+
+      const digits = formatForWhatsApp(appState.calc.mobile || "");
+      const url = digits ? `https://wa.me/${digits}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
+      window.open(url, "_blank");
+    }
+
+    function shareViaSms() {
+      autoSaveLead("SMS");
+      const p = getSelectedProduct();
+      const tenure = appState.calc.selectedTenure;
+      const principal = getPrincipalForTenure(tenure);
+      const emiRes = calculateEmi(principal, getApplicableRate(p, principal), tenure, p.rateType);
+      const msg = `KB Loan Proposal for ${appState.calc.customerName || "Client"}: ${p.name}, Amount: ${formatCurrency(principal)}, Tenure: ${tenure}M, EMI: ${formatCurrency(emiRes.emi)}/mo. Officer: ${appState.profile.officerName} (${appState.profile.staffId})`;
+      const digits = (appState.calc.mobile || "").replace(/\D/g, "");
+      window.location.href = `sms:${digits}?body=${encodeURIComponent(msg)}`;
+    }
+
+    function copyProposalText() {
+      autoSaveLead("Clipboard Quote");
+      const p = getSelectedProduct();
+      const tenure = appState.calc.selectedTenure;
+      const principal = getPrincipalForTenure(tenure);
+      const emiRes = calculateEmi(principal, getApplicableRate(p, principal), tenure, p.rateType);
+      const fee = calculateFee(p, principal);
+      const text = `KB BANK LOAN PROPOSAL\nCustomer: ${appState.calc.customerName || "Client"}\nPhone: ${appState.calc.mobile || "N/A"}\nProduct: ${p.name}\nAmount: ${formatCurrency(principal)}\nTenure: ${tenure} Mo\nEMI: ${formatCurrency(emiRes.emi)}\nUpfront Fee: ${formatCurrency(fee.totalFee)}\nOfficer: ${appState.profile.officerName} (${appState.profile.staffId})`;
+      navigator.clipboard.writeText(text);
+      showToast("Proposal quotation copied to clipboard!", "success");
+    }
+
+    function exportLeadsCsv() {
+      if (!appState.leads.length) return showToast("No leads to export", "warning");
+      const headers = ["Lead ID","Date","Customer Name","Mobile","DOB","Age","Monthly Income","Allowed DBR %","Product","Loan Amount","Tenure (Mo)","Monthly EMI","Total Profit","Processing Fee","Status","Follow-Up Date","Officer","Staff ID","Branch","Notes"];
+      const rows = appState.leads.map(l => [
+        `"${l.id}"`,
+        `"${new Date(l.createdAt).toLocaleDateString()}"`,
+        `"${(l.customerName || '').replace(/"/g, '""')}"`,
+        `"${l.mobile || ''}"`,
+        `"${l.dob || ''}"`,
+        l.age || '',
+        l.monthlyIncome || 0,
+        l.dbrAllowed || 0,
+        `"${(l.productName || '').replace(/"/g, '""')}"`,
+        l.loanAmount || 0,
+        l.tenureMonths || 0,
+        l.monthlyEmi || 0,
+        l.totalProfit || 0,
+        l.processingFee || 0,
+        `"${l.status || 'New'}"`,
+        `"${l.followUpDate || ''}"`,
+        `"${(l.officerName || '').replace(/"/g, '""')}"`,
+        `"${(l.officerId || '').replace(/"/g, '""')}"`,
+        `"${(l.branchName || '').replace(/"/g, '""')}"`,
+        `"${(l.notes || '').replace(/"/g, '""')}"`
+      ]);
+      const csv = [headers.join(","), ...rows.map(r => r.join(","))].join("\r\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `kb_loan_leads_${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+      showToast("CSV file exported successfully!", "success");
+    }
+
+    function showToast(msg, type = "info") {
+      const el = document.getElementById("toast-banner");
+      if (!el) return;
+      el.className = `fixed bottom-4 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded-xl text-white font-semibold text-xs shadow-xl z-50 transition-all ${
+        type === "success" ? "bg-emerald-600" : type === "warning" ? "bg-amber-600" : type === "error" ? "bg-rose-600" : "bg-slate-900"
+      }`;
+      el.innerText = msg;
+      el.style.display = "block";
+      clearTimeout(window._toastT);
+      window._toastT = setTimeout(() => { el.style.display = "none"; }, 3500);
+    }
+
+    // --- 5. DOM RENDERING ---
+    function renderApp() {
+      const root = document.getElementById("app-root");
+      if (!root) return;
+
+      if (!appState.profile.isOnboarded && !appState.showOnboarding) {
+        appState.showOnboarding = true;
+      }
+
+      const dueLeads = checkFollowUpReminders();
+
+      root.innerHTML = `
+        <!-- Top Header: strictly 'KB Loan Calculator' -->
+        <header class="bg-slate-900 text-white sticky top-0 z-40 shadow-lg">
+          <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+              <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-700 to-amber-500 flex items-center justify-center font-bold text-lg text-white shadow">
+                🏛️
+              </div>
+              <div>
+                <h1 class="font-extrabold text-base leading-tight">
+                  KB Loan Calculator
+                </h1>
+                <p class="text-xs text-slate-400">
+                  ${appState.profile.branchName || "Branch"} • ${appState.profile.officerName || "Officer"} (${appState.profile.staffId || "Staff ID"})
+                </p>
+              </div>
+            </div>
+
+            <div class="flex items-center space-x-2">
+              <span class="px-2.5 py-1 rounded-full text-[10px] font-bold flex items-center gap-1.5 ${appState.online ? 'bg-emerald-900/60 text-emerald-300 border border-emerald-500/40' : 'bg-amber-900/60 text-amber-300 border border-amber-500/40'}">
+                <span class="w-2 h-2 rounded-full ${appState.online ? 'bg-emerald-400' : 'bg-amber-400'}"></span>
+                ${appState.online ? 'Online' : 'Offline'}
+              </span>
+              <button onclick="appState.showProfileDialog = true; renderApp();" title="Officer Profile" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-bold flex items-center gap-1">
+                👤 Profile
+              </button>
+              <button onclick="toggleAdminPinModal()" title="Admin Security" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center gap-1">
+                ⚙️ Admin
+              </button>
+            </div>
+          </div>
+
+          <nav class="flex border-t border-slate-800 bg-slate-950/80 text-xs">
+            <button onclick="appState.activeTab = 'calc'; renderApp();" class="flex-1 py-2.5 text-center font-bold transition-colors ${
+              appState.activeTab === 'calc' ? 'text-amber-400 border-b-2 border-amber-400 bg-slate-900/90' : 'text-slate-400 hover:text-white'
+            }">
+              🧮 Calculator
+            </button>
+            <button onclick="appState.activeTab = 'leads'; renderApp();" class="flex-1 py-2.5 text-center font-bold transition-colors relative ${
+              appState.activeTab === 'leads' ? 'text-amber-400 border-b-2 border-amber-400 bg-slate-900/90' : 'text-slate-400 hover:text-white'
+            }">
+              📋 Leads (${appState.leads.length})
+              ${dueLeads.length > 0 ? `<span class="inline-block w-2 h-2 rounded-full bg-rose-500 ml-1 animate-ping"></span>` : ''}
+            </button>
+            <button onclick="handleAdminTabClick()" class="flex-1 py-2.5 text-center font-bold transition-colors ${
+              appState.activeTab === 'admin' ? 'text-amber-400 border-b-2 border-amber-400 bg-slate-900/90' : 'text-slate-400 hover:text-white'
+            }">
+              🔐 Admin & Slabs
+            </button>
+          </nav>
+        </header>
+
+        <!-- Visual Alarm Banner for Follow-Up Reminders -->
+        ${dueLeads.length > 0 ? `
+          <div class="bg-gradient-to-r from-amber-600 via-rose-600 to-amber-700 text-white px-4 py-2.5 shadow-md flex items-center justify-between text-xs animate-pulse-alarm">
+            <div class="flex items-center space-x-2">
+              <span class="text-base">🔔</span>
+              <div>
+                <span class="font-extrabold uppercase tracking-wide">URGENT FOLLOW-UP ALARM:</span>
+                <span>You have <b>${dueLeads.length} lead(s)</b> due for client follow-up today or overdue!</span>
+              </div>
+            </div>
+            <div class="flex items-center space-x-2">
+              <button onclick="triggerAlarmChime(); showToast('Chime triggered', 'info');" class="px-2.5 py-1 bg-white/20 hover:bg-white/30 rounded text-[10px] font-bold">
+                🔊 Sound
+              </button>
+              <button onclick="appState.activeTab = 'leads'; appState.leadFilterStatus = 'All'; renderApp();" class="px-3 py-1 bg-white text-rose-700 rounded-lg font-black text-xs shadow-xs hover:bg-slate-100">
+                View Leads ➔
+              </button>
+            </div>
+          </div>
+        ` : ''}
+
+        <main class="max-w-4xl mx-auto p-4 pb-24">
+          ${appState.activeTab === 'calc' ? renderCalculatorView() : ''}
+          ${appState.activeTab === 'leads' ? renderLeadsView() : ''}
+          ${appState.activeTab === 'admin' ? renderAdminView() : ''}
+        </main>
+
+        ${appState.showOnboarding ? renderOnboardingModal() : ''}
+        ${appState.showProfileDialog ? renderProfileModal() : ''}
+        ${appState.showAmortization ? renderAmortizationModal() : ''}
+        ${appState.showAdminAuth ? renderAdminAuthModal() : ''}
+        ${appState.showChangePassword ? renderChangePasswordModal() : ''}
+        ${appState.showProductEdit ? renderProductEditModal() : ''}
+        ${appState.editingLeadNote ? renderEditNoteModal() : ''}
+        ${appState.assignFollowUpLead ? renderAssignFollowUpModal() : ''}
+      `;
+    }
+
+    function handleAdminTabClick() {
+      if (appState.isAdminUnlocked) {
+        appState.activeTab = 'admin';
+      } else {
+        appState.showAdminAuth = true;
+      }
+      renderApp();
+    }
+
+    function toggleAdminPinModal() {
+      if (appState.isAdminUnlocked) {
+        appState.isAdminUnlocked = false;
+        showToast("Admin locked", "info");
+        if (appState.activeTab === 'admin') appState.activeTab = 'calc';
+      } else {
+        appState.showAdminAuth = true;
+      }
+      renderApp();
+    }
+
+    // --- CALCULATOR VIEW (Follow-Up Date REMOVED, all inputs vertically arranged) ---
+    function renderCalculatorView() {
+      const p = getSelectedProduct();
+      const age = calculateAge(appState.calc.dob);
+      const isAgeValid = appState.calc.dob ? age >= p.minAge : true;
+
+      const monthlyIncome = Number(appState.calc.monthlyIncomeInput) || 0;
+      const dbrPercent = Number(appState.calc.allowedDbrInput) || 0;
+      const maxEligibleEmi = (monthlyIncome > 0 && dbrPercent > 0) ? Math.round((monthlyIncome * dbrPercent) / 100) : 0;
+
+      const isAutoMaxMode = !appState.calc.loanAmountInput || Number(appState.calc.loanAmountInput.replace(/\D/g, "")) <= 0;
+      const currentPrincipal = getPrincipalForTenure(appState.calc.selectedTenure);
+      const currentRate = getApplicableRate(p, currentPrincipal);
+      const feeRes = calculateFee(p, currentPrincipal);
+
+      return `
+        <div class="space-y-4">
+          <!-- 1. Customer Profile Card: Vertically Arranged Inputs & Prominent Reset Button -->
+          <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs space-y-3">
+            <div class="flex justify-between items-center">
+              <h2 class="font-bold text-xs tracking-wider text-slate-700 uppercase">👤 Customer Profile</h2>
+              <div class="flex items-center space-x-2">
+                <button onclick="resetAllInputs()" class="px-3 py-1.5 text-xs font-bold text-rose-600 border border-rose-300 hover:bg-rose-50 rounded-xl flex items-center gap-1 shadow-xs transition-colors">
+                  ↺ Reset / Clear All
+                </button>
+                ${appState.calc.dob ? `
+                  <span class="text-xs px-2.5 py-1 rounded-full font-bold ${isAgeValid ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-rose-100 text-rose-800 border border-rose-300'}">
+                    🎂 Age: ${calculateDetailedAge(appState.calc.dob).text} (${calculateDetailedAge(appState.calc.dob).urduText}) • ${isAgeValid ? 'Eligible' : 'Under Min ' + p.minAge + ' Yrs'}
+                  </span>
+                ` : ''}
+              </div>
+            </div>
+
+            <!-- Customer Name (Full Width Vertical) -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">Customer Full Name</label>
+              <input type="text" value="${appState.calc.customerName}" 
+                oninput="appState.calc.customerName = this.value;" 
+                placeholder="Enter customer name..."
+                class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg outline-none font-semibold focus:ring-2 focus:ring-blue-600" />
+            </div>
+
+            <!-- Clean Standard Mobile Entry (Full Width Vertical) -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">Customer Mobile Number (e.g. 03425944951)</label>
+              <input type="tel" value="${appState.calc.mobile}" 
+                oninput="appState.calc.mobile = this.value; renderApp();" 
+                placeholder="03425944951"
+                class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg outline-none font-semibold focus:ring-2 focus:ring-blue-600" />
+              ${appState.calc.mobile ? `<p class="text-[10px] text-emerald-600 font-bold mt-1">Direct Ready: ${appState.calc.mobile} (wa.me/${formatForWhatsApp(appState.calc.mobile)})</p>` : ''}
+            </div>
+
+            <!-- Date of Birth (Full Width Vertical) -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">Date of Birth (Opens Calendar)</label>
+              <input type="date" value="${appState.calc.dob}" 
+                onchange="appState.calc.dob = this.value; renderApp();"
+                class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg outline-none font-semibold focus:ring-2 focus:ring-blue-600" />
+            </div>
+
+            <!-- Specific Lead Notes Textarea (Full Width Vertical) -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">Specific Lead Notes / Customer Details</label>
+              <textarea rows="2" 
+                oninput="appState.calc.specificNotes = this.value;" 
+                placeholder="Customer job status, company name, salary slip notes..."
+                class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-600">${appState.calc.specificNotes}</textarea>
+            </div>
+          </div>
+
+          <!-- 2. Facility & Dynamic Loan Amount: Vertically Arranged Elements -->
+          <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs space-y-3">
+            <h2 class="font-bold text-xs tracking-wider text-slate-700 uppercase">💼 Facility & Dynamic Pricing Slabs</h2>
+
+            <!-- Facility Selector (Full Width) -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">Loan Product</label>
+              <select onchange="appState.calc.productId = this.value; renderApp();" class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg font-bold text-slate-800 outline-none">
+                ${appState.products.map(prod => `
+                  <option value="${prod.id}" ${prod.id === p.id ? 'selected' : ''}>
+                    ${prod.name} (${prod.defaultAnnualRate}% ${prod.rateType.toUpperCase()})
+                  </option>
+                `).join('')}
+              </select>
+            </div>
+
+            <!-- Dedicated Loan Amount Textbox (Full Width Vertical Stack) -->
+            <div>
+              <div class="flex justify-between items-center mb-1">
+                <label class="text-xs font-semibold text-slate-600">Desired Loan Amount (PKR)</label>
+                ${isAutoMaxMode ? '<span class="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded">AUTO DBR MAX MODE</span>' : ''}
+              </div>
+              <input type="text" value="${appState.calc.loanAmountInput}" 
+                oninput="appState.calc.loanAmountInput = this.value; renderApp();" 
+                placeholder="Leave BLANK to auto-calculate maximum possible loan"
+                class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg outline-none font-bold text-blue-900 focus:ring-2 focus:ring-blue-600 placeholder:text-slate-400" />
+              <p class="text-[10px] text-slate-400 mt-1">
+                ${isAutoMaxMode ? '⚡ Amount is blank: Matrix will calculate maximum affordable loan for every tenure.' : 'Active Principal: ' + formatCurrency(currentPrincipal) + ' • Rate Applied: ' + currentRate + '%'}
+              </p>
+            </div>
+          </div>
+
+          <!-- 3. Financial & DBR Capacity Card: Horizontal Net Income & DBR (Clean, No Presets, No Formula Hint) -->
+          <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs space-y-3">
+            <div class="flex justify-between items-center">
+              <h2 class="font-bold text-xs tracking-wider text-slate-700 uppercase">📊 Debt Burden Ratio (DBR) Capacity</h2>
+            </div>
+
+            <!-- Horizontal Row for Income and Allowed DBR -->
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Net Monthly Income (PKR) *</label>
+                <input type="number" step="5000" value="${appState.calc.monthlyIncomeInput}" 
+                  oninput="appState.calc.monthlyIncomeInput = this.value; renderApp();" 
+                  placeholder="e.g. 150000"
+                  class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg font-bold outline-none placeholder:text-slate-400 text-slate-800 focus:ring-2 focus:ring-blue-600" />
+              </div>
+
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">Allowed DBR % *</label>
+                <input type="number" value="${appState.calc.allowedDbrInput}" 
+                  oninput="appState.calc.allowedDbrInput = this.value; renderApp();" 
+                  placeholder="e.g. 50"
+                  class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg font-bold outline-none placeholder:text-slate-400 text-slate-800 focus:ring-2 focus:ring-blue-600" />
+              </div>
+            </div>
+
+            <!-- Capacity Banner (Clean display without formula hint) -->
+            <div class="p-3 rounded-xl bg-slate-900 text-white flex justify-between items-center">
+              <div>
+                <span class="text-[10px] text-slate-400 block">Max Allowable Monthly Installment (DBR Cap):</span>
+                <span class="text-base font-black text-amber-400">${maxEligibleEmi > 0 ? formatCurrency(maxEligibleEmi) + ' / mo' : 'Enter Income & DBR %'}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4. RELOCATED SECTION: Communication & Save Toolbar (Vertically Arranged Buttons) -->
+          <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs space-y-3">
+            <div>
+              <h3 class="font-bold text-xs tracking-wider text-slate-700 uppercase">Dispatch / Communication & Save Lead</h3>
+              <p class="text-[10px] text-slate-400">All actions instantly record an immutable lead record tied to your Officer ID.</p>
+            </div>
+            
+            <!-- Full Width Vertically Arranged Buttons -->
+            <div class="flex flex-col space-y-2 pt-1">
+              <button onclick="shareViaWhatsApp()" class="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-2 transition-colors">
+                💬 Share Proposal on WhatsApp
+              </button>
+              <button onclick="shareViaSms()" class="w-full py-2.5 px-3 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-2 transition-colors">
+                ✉️ Send SMS Proposal
+              </button>
+              <button onclick="copyProposalText()" class="w-full py-2.5 px-3 bg-slate-700 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-2 transition-colors">
+                📋 Copy Proposal Quotation
+              </button>
+              <button onclick="autoSaveLead('Manual Save Button')" class="w-full py-2.5 px-3 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-2 transition-colors">
+                💾 Save Customer Lead to Pipeline
+              </button>
+            </div>
+          </div>
+
+          <!-- 5. Interactive 120-Month Eligibility Matrix -->
+          <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs space-y-3">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+              <div>
+                <h2 class="font-bold text-xs tracking-wider text-slate-700 uppercase">⚡ Eligibility Matrix (1 to 120 Months)</h2>
+                <p class="text-[11px] text-slate-500">Click any row to open the Amortization Table.</p>
+              </div>
+
+              <div class="flex space-x-1 text-xs">
+                ${['All', '1-12', '13-36', '37-60', '61-120'].map(f => `
+                  <button onclick="appState.calc.matrixTenureFilter = '${f}'; renderApp();" class="px-2 py-1 rounded text-[10px] font-bold ${
+                    appState.calc.matrixTenureFilter === f ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }">${f}</button>
+                `).join('')}
+              </div>
+            </div>
+
+            ${!(monthlyIncome > 0 && dbrPercent > 0) ? `
+              <div class="bg-slate-50 border border-slate-200 rounded-xl p-8 text-center space-y-2">
+                <span class="text-2xl block">📊</span>
+                <h3 class="font-extrabold text-sm text-slate-800">Enter Monthly Income & Allowed DBR %</h3>
+                <p class="text-xs text-slate-500 max-w-md mx-auto">
+                  Please enter Net Monthly Income and Allowed DBR above to automatically generate your 120-Month Eligibility Matrix & Loan Options.
+                </p>
+                <p class="text-[11px] text-slate-400 font-urdu pt-1">
+                  براہ کرم خالص ماہانہ آمدنی اور DBR درج کریں تاکہ 120 مہینوں کے تمام پلانز ظاہر ہوں۔
+                </p>
+              </div>
+            ` : `
+              <div class="table-scroll border border-slate-200 rounded-xl overflow-hidden max-h-96">
+                <table class="w-full text-left border-collapse text-xs">
+                  <thead class="bg-slate-100 text-slate-700 font-bold sticky top-0 border-b border-slate-200 text-[11px]">
+                    <tr>
+                      <th class="p-2">Tenure</th>
+                      <th class="p-2">Principal</th>
+                      <th class="p-2">Monthly EMI</th>
+                      <th class="p-2">Profit</th>
+                      <th class="p-2">Fee+FED</th>
+                      <th class="p-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 text-[11px]">
+                    ${render120TenureRows(p, age, maxEligibleEmi)}
+                  </tbody>
+                </table>
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+    }
+
+    function render120TenureRows(product, customerAge, maxEligibleEmi) {
+      const filter = appState.calc.matrixTenureFilter || "All";
+      const tenures = [];
+      for (let t = 1; t <= 120; t++) {
+        if (filter === "1-12" && (t < 1 || t > 12)) continue;
+        if (filter === "13-36" && (t < 13 || t > 36)) continue;
+        if (filter === "37-60" && (t < 37 || t > 60)) continue;
+        if (filter === "61-120" && (t < 61 || t > 120)) continue;
+        tenures.push(t);
+      }
+
+      const isAutoMaxMode = !appState.calc.loanAmountInput || Number(appState.calc.loanAmountInput.replace(/\D/g, "")) <= 0;
+      const effIncome = Number(appState.calc.monthlyIncomeInput) || 0;
+      const effDbr = Number(appState.calc.allowedDbrInput) || 0;
+      const effMaxEmi = Math.round((effIncome * effDbr) / 100);
+
+      return tenures.map(t => {
+        const principal = getPrincipalForTenure(t);
+        const rate = getApplicableRate(product, principal);
+        const emiRes = calculateEmi(principal, rate, t, product.rateType);
+        const feeRes = calculateFee(product, principal);
+
+        const isPlanEligible = isAutoMaxMode ? true : (emiRes.emi <= effMaxEmi);
+        const dbrPercent = effIncome > 0 ? ((emiRes.emi / effIncome) * 100).toFixed(1) : "—";
+        const isSelected = appState.calc.selectedTenure === t;
+
+        return `
+          <tr class="hover:bg-blue-50/50 cursor-pointer transition-colors ${isSelected ? 'bg-amber-50/80 font-semibold' : ''}"
+            onclick="appState.calc.selectedTenure = ${t}; openAmortizationModal(${t});" title="Click to view Amortization Schedule">
+            <td class="p-2 font-bold text-slate-800">${t} Mo <span class="text-[10px] text-slate-400 font-normal">(${(t/12).toFixed(1)}y)</span></td>
+            <td class="p-2 font-bold text-slate-700">${formatCurrency(principal)}</td>
+            <td class="p-2 font-extrabold text-blue-900">${formatCurrency(emiRes.emi)}</td>
+            <td class="p-2 text-slate-600">${formatCurrency(emiRes.totalProfit)}</td>
+            <td class="p-2 text-slate-500">${formatCurrency(feeRes.totalFee)}</td>
+            <td class="p-2">
+              ${isPlanEligible ? `
+                <span class="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                  ELIGIBLE (${dbrPercent}%)
+                </span>
+              ` : `
+                <span class="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800">
+                  EXCEEDS DBR (${dbrPercent}%)
+                </span>
+              `}
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // --- AMORTIZATION MODAL ---
+    function openAmortizationModal(tenure) {
+      appState.calc.selectedTenure = tenure;
+      appState.showAmortization = true;
+      appState.extraPayments = {};
+      renderApp();
+    }
+
+    function renderAmortizationModal() {
+      const p = getSelectedProduct();
+      const tenure = appState.calc.selectedTenure;
+      const principal = getPrincipalForTenure(tenure);
+      const rate = getApplicableRate(p, principal);
+      const mode = appState.prepaymentMode || "reduce_emi";
+      const { rows, summary } = generateInteractiveSchedule(principal, rate, tenure, p.rateType, appState.extraPayments, mode);
+
+      return `
+        <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 z-50 overflow-y-auto">
+          <div class="modal-container bg-white w-full max-w-4xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[92vh] flex flex-col">
+            
+            <div class="bg-slate-900 text-white p-4 flex justify-between items-center no-print">
+              <div>
+                <h3 class="font-bold text-sm">📜 KB Amortization Table & Early Prepayment Modification</h3>
+                <p class="text-xs text-slate-400">${p.name} • ${formatCurrency(principal)} • ${tenure} Months @ ${rate}% APR</p>
+              </div>
+              <div class="flex items-center space-x-2">
+                ${summary.totalExtraPaid > 0 ? `
+                  <button onclick="appState.extraPayments = {}; renderApp();" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded font-bold text-xs">
+                    ↺ Reset Extras
+                  </button>
+                ` : ''}
+                <button onclick="appState.showAmortization = false; renderApp();" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center font-bold">
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <!-- Dual Extra Payment Recalculation Mode Selector -->
+            <div class="bg-slate-800 text-white px-4 py-2 flex flex-col sm:flex-row justify-between items-center gap-2 border-b border-slate-700 no-print">
+              <span class="text-xs font-bold text-amber-300 uppercase tracking-wider">Recalculation Strategy on Extra Payment:</span>
+              <div class="flex space-x-2">
+                <button onclick="appState.prepaymentMode = 'reduce_emi'; renderApp();" 
+                  class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    mode === 'reduce_emi' ? 'bg-blue-600 text-white ring-2 ring-blue-400 shadow-md' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  }">
+                  Option A: Reduce Monthly EMI
+                </button>
+                <button onclick="appState.prepaymentMode = 'reduce_tenure'; renderApp();" 
+                  class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    mode === 'reduce_tenure' ? 'bg-emerald-600 text-white ring-2 ring-emerald-400 shadow-md' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  }">
+                  Option B: Reduce Loan Tenure / Duration
+                </button>
+              </div>
+            </div>
+
+            ${summary.totalExtraPaid > 0 ? `
+              <div class="bg-emerald-50 border-b border-emerald-200 p-3 flex justify-between items-center text-xs">
+                <div>
+                  <span class="text-emerald-900 font-extrabold block text-sm">🎉 BANK PROFIT / INTEREST SAVED: ${formatCurrency(summary.profitSaved)}</span>
+                  <span class="text-emerald-700">Total Extra Paid: ${formatCurrency(summary.totalExtraPaid)} • ${
+                    mode === 'reduce_emi' ? `Revised Future Monthly EMI: <b>${formatCurrency(summary.revisedEmi)}/mo</b>` : `Revised Duration: Month ${summary.revisedTenure} (Saved ${summary.monthsSaved} Months Early!)`
+                  }</span>
+                </div>
+                <div class="text-right">
+                  <span class="text-slate-500 block text-[10px]">Revised Total Profit:</span>
+                  <span class="font-bold text-slate-800">${formatCurrency(summary.revisedProfit)} (Orig: ${formatCurrency(summary.originalProfit)})</span>
+                </div>
+              </div>
+            ` : ''}
+
+            <div class="bg-slate-50 p-2.5 text-[11px] text-slate-600 border-b border-slate-200">
+              💡 <b>Interactive Extra Payment:</b> Type any extra lump-sum into the <b>"Extra Principal"</b> box on any month row (e.g. 40,000 at Month 4). The table dynamically calculates interest waiver and payoff savings.
+            </div>
+
+            <!-- Schedule Table with Row-Level Inputs -->
+            <div class="p-3 overflow-y-auto flex-1">
+              <table class="w-full text-left border-collapse text-[11px]">
+                <thead class="bg-slate-100 text-slate-700 sticky top-0 font-bold border-b border-slate-200">
+                  <tr>
+                    <th class="p-2">Mo</th>
+                    <th class="p-2">Opening</th>
+                    <th class="p-2">Principal</th>
+                    <th class="p-2">Profit</th>
+                    <th class="p-2">Total EMI</th>
+                    <th class="p-2 text-amber-800">Extra Principal (PKR)</th>
+                    <th class="p-2">Closing</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  ${rows.map(r => `
+                    <tr class="hover:bg-slate-50">
+                      <td class="p-2 font-mono font-bold">${r.month}</td>
+                      <td class="p-2 text-slate-600">${formatCurrency(r.opening).replace("PKR ", "")}</td>
+                      <td class="p-2 font-semibold text-emerald-800">${formatCurrency(r.principal).replace("PKR ", "")}</td>
+                      <td class="p-2 font-semibold text-amber-800">${formatCurrency(r.profit).replace("PKR ", "")}</td>
+                      <td class="p-2 font-bold text-blue-900">${formatCurrency(r.emi).replace("PKR ", "")}</td>
+                      <td class="p-2">
+                        <input type="number" step="5000" min="0" value="${r.extra || ''}" placeholder="0"
+                          oninput="appState.extraPayments[${r.month}] = Number(this.value) || 0; renderApp();"
+                          class="w-28 px-2.5 py-1.5 bg-amber-50/90 text-slate-900 font-extrabold text-xs border border-amber-400 rounded-md outline-none focus:ring-2 focus:ring-amber-500 shadow-inner" />
+                      </td>
+                      <td class="p-2 font-mono text-slate-700">${formatCurrency(r.closing).replace("PKR ", "")}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+
+            <div class="bg-slate-100 p-3 flex justify-between items-center border-t border-slate-200 no-print">
+              <button onclick="window.print()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold shadow-xs">
+                🖨️ Print / Export PDF
+              </button>
+              <button onclick="appState.showAmortization = false; renderApp();" class="px-4 py-1.5 bg-slate-300 hover:bg-slate-400 text-slate-800 rounded-lg text-xs font-bold">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // --- LEADS MANAGEMENT VIEW ---
+    function renderLeadsView() {
+      const allLeads = appState.leads;
+
+      const activeLeads = allLeads.filter(l => l.status !== "Lost" && l.status !== "Converted");
+      const activePipelineValue = activeLeads.reduce((sum, l) => sum + (Number(l.loanAmount) || 0), 0);
+
+      const convertedLeads = allLeads.filter(l => l.status === "Converted");
+      const convertedValue = convertedLeads.reduce((sum, l) => sum + (Number(l.loanAmount) || 0), 0);
+
+      const lostLeads = allLeads.filter(l => l.status === "Lost");
+      const lostValue = lostLeads.reduce((sum, l) => sum + (Number(l.loanAmount) || 0), 0);
+
+      const q = (appState.leadSearchQuery || "").toLowerCase();
+      const bFilter = (appState.leadSupervisorBranch || "").toLowerCase();
+      const sFilter = appState.leadFilterStatus || "All";
+
+      const filtered = allLeads.filter(l => {
+        const matchesStatus = sFilter === "All" || l.status === sFilter;
+        const matchesBranch = !bFilter || (l.branchName && l.branchName.toLowerCase().includes(bFilter));
+        const matchesSearch = !q || (
+          (l.customerName && l.customerName.toLowerCase().includes(q)) ||
+          (l.mobile && l.mobile.includes(q)) ||
+          (l.branchName && l.branchName.toLowerCase().includes(q)) ||
+          (l.officerId && l.officerId.toLowerCase().includes(q)) ||
+          (l.notes && l.notes.toLowerCase().includes(q))
+        );
+        return matchesStatus && matchesBranch && matchesSearch;
+      });
+
+      return `
+        <div class="space-y-4">
+          <!-- Real-Time Dashboard KPI Cards (Arranged in a responsive vertical stack so numbers and currency never clip) -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-1">
+              <span class="text-[11px] text-slate-500 block font-bold uppercase tracking-wider">Total Leads Logged</span>
+              <span class="text-2xl font-black text-slate-900">${allLeads.length}</span>
+              <p class="text-[11px] text-slate-400">Across Branch Database</p>
+            </div>
+
+            <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-1">
+              <span class="text-[11px] text-blue-600 block font-bold uppercase tracking-wider">Remaining Active Pipeline</span>
+              <span class="text-xl font-black text-blue-900">${formatCurrency(activePipelineValue)}</span>
+              <p class="text-[11px] text-blue-600 font-semibold">${activeLeads.length} Active Deals</p>
+            </div>
+
+            <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-1">
+              <span class="text-[11px] text-emerald-600 block font-bold uppercase tracking-wider">Converted Deals Value</span>
+              <span class="text-xl font-black text-emerald-700">${formatCurrency(convertedValue)}</span>
+              <p class="text-[11px] text-emerald-600 font-semibold">${convertedLeads.length} Converted Deals</p>
+            </div>
+
+            <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-1">
+              <span class="text-[11px] text-rose-600 block font-bold uppercase tracking-wider">Lost / Deducted Deals</span>
+              <span class="text-xl font-black text-rose-700">${formatCurrency(lostValue)}</span>
+              <p class="text-[11px] text-rose-600 font-semibold">${lostLeads.length} Deducted Leads</p>
+            </div>
+          </div>
+
+          <!-- Supervisor Branch Filter & Search Toolbar (Vertically Arranged with Full Width) -->
+          <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+            <div>
+              <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Filter by Status</label>
+              <select onchange="appState.leadFilterStatus = this.value; renderApp();"
+                class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg font-bold text-slate-800 outline-none">
+                <option value="All" ${sFilter === 'All' ? 'selected' : ''}>All Leads (${allLeads.length})</option>
+                <option value="New" ${sFilter === 'New' ? 'selected' : ''}>New (${allLeads.filter(x => x.status === 'New').length})</option>
+                <option value="Contacted" ${sFilter === 'Contacted' ? 'selected' : ''}>Contacted (${allLeads.filter(x => x.status === 'Contacted').length})</option>
+                <option value="Converted" ${sFilter === 'Converted' ? 'selected' : ''}>Converted (${allLeads.filter(x => x.status === 'Converted').length})</option>
+                <option value="Lost" ${sFilter === 'Lost' ? 'selected' : ''}>Lost (${allLeads.filter(x => x.status === 'Lost').length})</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Supervisor Branch Search</label>
+              <input type="text" value="${appState.leadSupervisorBranch || ''}" 
+                placeholder="e.g. Peshawar Branch (Filters all leads under this branch)" 
+                oninput="appState.leadSupervisorBranch = this.value; renderApp();"
+                class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg outline-none font-semibold" />
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Customer / Phone Search</label>
+              <input type="text" value="${appState.leadSearchQuery || ''}" 
+                placeholder="Search customer name, phone, notes..." 
+                oninput="appState.leadSearchQuery = this.value; renderApp();"
+                class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg outline-none font-semibold" />
+            </div>
+
+            <button onclick="exportLeadsCsv()" class="w-full py-2.5 px-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-2">
+              📥 Export All Filtered Leads to CSV File
+            </button>
+          </div>
+
+          <!-- Vertical Card Layout for Leads -->
+          <div class="space-y-4" id="leads-list-container">
+            ${filtered.map(lead => renderSingleVerticalLeadCard(lead)).join('')}
+            ${filtered.length === 0 ? '<div class="p-8 text-center text-slate-400 text-xs bg-white rounded-2xl border">No leads found matching your filters.</div>' : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    // Vertical Card displaying fields clearly line-by-line with dedicated "Assign Follow-Up Date" button
+    function renderSingleVerticalLeadCard(lead) {
+      const statusColors = {
+        New: "bg-blue-100 text-blue-800",
+        Contacted: "bg-amber-100 text-amber-800",
+        Converted: "bg-emerald-100 text-emerald-800",
+        Lost: "bg-rose-100 text-rose-800"
+      };
+
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const isDueToday = lead.followUpDate && lead.followUpDate === todayStr;
+      const isOverdue = lead.followUpDate && lead.followUpDate < todayStr && lead.status !== "Lost" && lead.status !== "Converted";
+
+      return `
+        <div class="bg-white rounded-2xl p-4 border ${isDueToday || isOverdue ? 'border-amber-400 ring-2 ring-amber-200' : 'border-slate-200'} shadow-xs space-y-3">
+          
+          <!-- Top Row: Name, Status & Follow-Up Alarm Indicator -->
+          <div class="flex justify-between items-start">
+            <div>
+              <div class="flex items-center space-x-2">
+                <span class="font-black text-slate-900 text-base">${lead.customerName}</span>
+                <span class="text-[9px] px-2 py-0.5 rounded-full font-bold uppercase ${statusColors[lead.status] || 'bg-slate-100'}">
+                  ${lead.status}
+                </span>
+              </div>
+              ${isDueToday ? `<span class="inline-block text-[9px] px-2 py-0.5 rounded-full font-black bg-amber-500 text-white animate-pulse mt-1">⏰ DUE TODAY</span>` : ''}
+              ${isOverdue ? `<span class="inline-block text-[9px] px-2 py-0.5 rounded-full font-black bg-rose-600 text-white animate-pulse mt-1">⚠️ OVERDUE</span>` : ''}
+              <p class="text-xs text-slate-500 font-mono mt-0.5">📞 ${lead.mobile || 'No Phone'}</p>
+            </div>
+            <div class="text-right">
+              <span class="text-sm font-black text-blue-900">${formatCurrency(lead.loanAmount)}</span>
+              <p class="text-[10px] text-slate-400">${new Date(lead.createdAt).toLocaleDateString()}</p>
+            </div>
+          </div>
+
+          <!-- Vertical Line-by-Line Specifications -->
+          <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 divide-y divide-slate-200/60 text-xs">
+            <div class="py-1 flex justify-between">
+              <span class="text-slate-500">Date of Birth & Age:</span>
+              <span class="font-bold text-slate-800">${lead.dob || 'N/A'} ${lead.age ? '(' + lead.age + ' yrs)' : ''}</span>
+            </div>
+            <div class="py-1 flex justify-between">
+              <span class="text-slate-500">Loan Facility:</span>
+              <span class="font-bold text-slate-800">${lead.productName}</span>
+            </div>
+            <div class="py-1 flex justify-between">
+              <span class="text-slate-500">Loan Amount:</span>
+              <span class="font-black text-blue-900">${formatCurrency(lead.loanAmount)}</span>
+            </div>
+            <div class="py-1 flex justify-between">
+              <span class="text-slate-500">Tenure:</span>
+              <span class="font-bold text-slate-800">${lead.tenureMonths} Months (${(lead.tenureMonths/12).toFixed(1)} Yrs)</span>
+            </div>
+            <div class="py-1 flex justify-between">
+              <span class="text-slate-500">Monthly EMI:</span>
+              <span class="font-black text-blue-900">${formatCurrency(lead.monthlyEmi)}</span>
+            </div>
+            <div class="py-1 flex justify-between">
+              <span class="text-slate-500">Officer ID:</span>
+              <span class="font-bold text-slate-800">${lead.officerId || 'RO-8942'} (${lead.officerName || 'Officer'})</span>
+            </div>
+            <div class="py-1 flex justify-between">
+              <span class="text-slate-500">Branch Name:</span>
+              <span class="font-bold text-slate-800">${lead.branchName || 'Main Branch'}</span>
+            </div>
+            <div class="py-1 flex justify-between items-center">
+              <span class="text-slate-500 font-semibold">Scheduled Follow-Up:</span>
+              <span class="font-extrabold ${isDueToday || isOverdue ? 'text-amber-700' : 'text-slate-800'}">
+                ${lead.followUpDate ? '📅 ' + lead.followUpDate : 'Not Assigned'}
+              </span>
+            </div>
+          </div>
+
+          <!-- Notes section with Editable Note / Comment Button -->
+          <div class="bg-amber-50/70 p-2.5 rounded-xl border border-amber-200 flex justify-between items-start text-xs">
+            <div class="flex-1 mr-2">
+              <span class="text-[10px] font-bold text-amber-900 block uppercase">📝 Notes / Comments:</span>
+              <p class="text-slate-700 italic">${lead.notes || 'No notes added yet.'}</p>
+            </div>
+            <button onclick="openEditNoteModal('${lead.id}')" class="px-2.5 py-1 bg-amber-200 hover:bg-amber-300 text-amber-950 font-bold rounded-lg text-[10px] shrink-0">
+              ✏️ Edit Note
+            </button>
+          </div>
+
+          <!-- DEDICATED BUTTON: Assign / Change Follow-Up Date to this specific customer -->
+          <div class="space-y-1.5">
+            <button onclick="openAssignFollowUpModal('${lead.id}')" class="w-full py-2.5 px-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-2 transition-colors">
+              📅 ${lead.followUpDate ? 'Change Follow-Up Date (' + lead.followUpDate + ')' : 'Assign Follow-Up Date to Customer'}
+            </button>
+            ${lead.followUpDate ? `
+              <button onclick="clearLeadFollowUpDate('${lead.id}')" class="w-full py-2 px-3 border border-rose-300 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition-colors">
+                ✕ Remove Follow-Up Date
+              </button>
+            ` : ''}
+          </div>
+
+          <!-- Action Bar: 4 Buttons arranged in 2 horizontal rows under Assign Follow-Up Date -->
+          <div class="space-y-2 pt-2 border-t border-slate-100">
+            <!-- Row 1: Status & Call Customer -->
+            <div class="grid grid-cols-2 gap-2">
+              <div class="flex items-center space-x-1.5 text-xs">
+                <span class="text-slate-500 font-semibold text-[10px]">Status:</span>
+                <select onchange="updateLeadStatus('${lead.id}', this.value)" class="flex-1 bg-slate-100 border border-slate-300 rounded-lg px-2 py-1.5 font-bold outline-none text-xs">
+                  <option value="New" ${lead.status === 'New' ? 'selected' : ''}>New</option>
+                  <option value="Contacted" ${lead.status === 'Contacted' ? 'selected' : ''}>Contacted</option>
+                  <option value="Converted" ${lead.status === 'Converted' ? 'selected' : ''}>Converted</option>
+                  <option value="Lost" ${lead.status === 'Lost' ? 'selected' : ''}>Lost</option>
+                </select>
+              </div>
+
+              <a href="tel:${lead.mobile}" class="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-bold shadow-xs">
+                📞 Call Customer
+              </a>
+            </div>
+
+            <!-- Row 2: WhatsApp & SMS -->
+            <div class="grid grid-cols-2 gap-2">
+              <button onclick="window.open('https://wa.me/${formatForWhatsApp(lead.mobile)}?text=' + encodeURIComponent('Dear ${lead.customerName}, following up regarding your ${lead.productName} proposal of ${formatCurrency(lead.loanAmount)}.'), '_blank')" 
+                class="flex items-center justify-center gap-1.5 py-2 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs">
+                💬 WhatsApp
+              </button>
+              <a href="sms:${(lead.mobile || '').replace(/\D/g, '')}?body=${encodeURIComponent('Dear ' + lead.customerName + ', regarding your KB Loan proposal of ' + formatCurrency(lead.loanAmount) + ' (EMI: ' + formatCurrency(lead.monthlyEmi) + '/mo).')}" 
+                class="flex items-center justify-center gap-1.5 py-2 px-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-bold shadow-xs">
+                ✉️ SMS Proposal
+              </a>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Modal to Assign Follow-Up Date for a specific customer
+    function renderAssignFollowUpModal() {
+      const item = appState.assignFollowUpLead;
+      if (!item) return '';
+      return `
+        <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 z-50">
+          <div class="bg-white w-full max-w-sm rounded-2xl shadow-2xl border border-slate-200 p-5 space-y-4">
+            <div>
+              <h3 class="font-extrabold text-sm text-slate-900">📅 Assign Customer Follow-Up Date</h3>
+              <p class="text-xs text-slate-500">Customer: <b>${item.customerName}</b></p>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1">Select Scheduled Follow-Up Date</label>
+              <input type="date" value="${item.followUpDate}" 
+                onchange="appState.assignFollowUpLead.followUpDate = this.value;"
+                class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg outline-none font-bold text-slate-900 focus:ring-2 focus:ring-amber-500" />
+            </div>
+            <div class="flex space-x-2 pt-1">
+              ${item.followUpDate ? `
+                <button onclick="clearLeadFollowUpDate('${item.id}')" class="flex-1 py-2 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg text-xs font-bold">Remove Date</button>
+              ` : ''}
+              <button onclick="appState.assignFollowUpLead = null; renderApp();" class="flex-1 py-2 bg-slate-200 text-slate-700 rounded-lg text-xs font-bold">Cancel</button>
+              <button onclick="saveAssignedFollowUpDate()" class="flex-1 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold shadow-xs">Assign Date</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Modal to Edit Lead Note
+    function renderEditNoteModal() {
+      if (!appState.editingLeadNote) return '';
+      return `
+        <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 z-50">
+          <div class="bg-white w-full max-w-sm rounded-2xl shadow-2xl border border-slate-200 p-5 space-y-3">
+            <h3 class="font-extrabold text-sm text-slate-900">Edit Note / Customer Comment</h3>
+            <textarea rows="4" 
+              oninput="appState.editingLeadNote.notes = this.value;" 
+              class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg outline-none font-medium">${appState.editingLeadNote.notes}</textarea>
+            <div class="flex space-x-2 pt-1">
+              <button onclick="appState.editingLeadNote = null; renderApp();" class="flex-1 py-2 bg-slate-200 text-slate-700 rounded-lg text-xs font-bold">Cancel</button>
+              <button onclick="saveEditedNote()" class="flex-1 py-2 bg-blue-700 text-white rounded-lg text-xs font-bold">Save Note</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // --- ADMIN PANEL & DYNAMIC SLAB CONFIGURATION ENGINE ---
+    function renderAdminView() {
+      return `
+        <div class="space-y-4">
+          <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <div>
+              <h2 class="font-bold text-xs tracking-wider text-slate-700 uppercase">🔐 Admin Security & SOC Slabs</h2>
+              <p class="text-xs text-slate-500">Tiered rate slabs, processing fee rules, and Federal Excise Duty (FED %)</p>
+            </div>
+            <div class="flex items-center space-x-2 w-full sm:w-auto">
+              <button onclick="appState.showChangePassword = true; renderApp();" class="flex-1 sm:flex-initial px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold transition-colors">
+                Change Password
+              </button>
+              <button onclick="toggleAdminPinModal()" class="flex-1 sm:flex-initial px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-colors">
+                Lock Admin
+              </button>
+            </div>
+          </div>
+
+          <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-2">
+            <h3 class="font-bold text-xs text-slate-800 uppercase">Global Federal Excise Duty (FED %) on Fees</h3>
+            <p class="text-[11px] text-slate-500">Excise duty applied over banking processing charges across facilities.</p>
+            <div class="flex space-x-2 items-center">
+              <input type="number" step="0.5" value="${appState.profile.fedRate}" id="admin-fed-rate-input"
+                class="w-32 px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg font-bold outline-none" />
+              <button onclick="appState.profile.fedRate = Number(document.getElementById('admin-fed-rate-input').value) || 16; saveState(); showToast('FED % Updated', 'success'); renderApp();"
+                class="px-4 py-1.5 bg-blue-700 text-white rounded-lg text-xs font-bold">
+                Save FED %
+              </button>
+            </div>
+          </div>
+
+          <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+              <div>
+                <h3 class="font-bold text-xs text-slate-800 uppercase">Bank Products & Tiered Slabs (${appState.products.length})</h3>
+                <p class="text-[10px] text-slate-400">Updates auto-sync silently to all connected officers.</p>
+              </div>
+              <div class="flex items-center space-x-2">
+                <button onclick="appState.products = JSON.parse(JSON.stringify(DEFAULT_PRODUCTS)); saveState(); showToast('Reset to SOC defaults', 'success'); renderApp();" class="px-3 py-2 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold">
+                  ↺ Reset SOC
+                </button>
+                <button onclick="openProductEditModal(null)" class="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1 transition-colors">
+                  + Add Facility
+                </button>
+              </div>
+            </div>
+
+            <div class="space-y-3">
+              ${appState.products.map(p => `
+                <div class="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2.5">
+                  <div class="flex justify-between items-start">
+                    <div>
+                      <h4 class="font-extrabold text-xs text-slate-900">${p.name}</h4>
+                      <p class="text-[10px] text-slate-500">Base Rate: ${p.defaultAnnualRate}% (${p.rateType.toUpperCase()}) • Tenure: ${p.minTenure}-${p.maxTenure} Mo</p>
+                    </div>
+                    <div class="space-x-1">
+                      <button onclick="openProductEditModal('${p.id}')" class="px-2.5 py-1 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg text-xs font-bold text-slate-700">✏️ Edit</button>
+                      <button onclick="deleteProduct('${p.id}')" class="px-2.5 py-1 bg-white border border-rose-200 hover:bg-rose-50 rounded-lg text-xs font-bold text-rose-600">🗑️</button>
+                    </div>
+                  </div>
+
+                  ${p.rateSlabs && p.rateSlabs.length ? `
+                    <div class="text-[11px] bg-blue-50/80 p-2.5 rounded-lg border border-blue-100 space-y-1">
+                      <b class="text-blue-900 block text-[10px] uppercase tracking-wide">Multi-Tier Interest Rate Slabs:</b>
+                      ${p.rateSlabs.map((s, idx) => `
+                        <div class="flex justify-between text-slate-700">
+                          <span>Slab ${idx + 1}: ${formatCurrency(s.minAmount)} to ${formatCurrency(s.maxAmount)}</span>
+                          <span class="font-extrabold text-blue-900">${s.annualRate}% APR</span>
+                        </div>
+                      `).join('')}
+                    </div>
+                  ` : '<p class="text-[10px] text-slate-400 italic">No tiered rate slabs configured (uses base rate).</p>'}
+
+                  ${p.feeSlabs && p.feeSlabs.length ? `
+                    <div class="text-[11px] bg-emerald-50/80 p-2.5 rounded-lg border border-emerald-100 space-y-1">
+                      <b class="text-emerald-900 block text-[10px] uppercase tracking-wide">Multi-Tier Processing Fee Slabs (Whichever is higher rule):</b>
+                      ${p.feeSlabs.map((f, idx) => `
+                        <div class="flex justify-between text-slate-700">
+                          <span>Slab ${idx + 1}: ${formatCurrency(f.minAmount)} to ${formatCurrency(f.maxAmount)}</span>
+                          <span class="font-bold text-emerald-900">
+                            ${f.feeType === 'fixed' ? 'Fixed Rs ' + f.feeValue : f.feeValue + '% (Min Rs ' + (f.minFee || 0) + (f.maxFee ? ', Max Rs ' + f.maxFee : '') + ')'}
+                          </span>
+                        </div>
+                      `).join('')}
+                    </div>
+                  ` : '<p class="text-[10px] text-slate-400 italic">No tiered fee slabs configured (uses base fee).</p>'}
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // --- ONBOARDING & PROFILE MODALS ---
+    function renderOnboardingModal() {
+      return `
+        <div class="fixed inset-0 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-3 z-50">
+          <div class="bg-white w-full max-w-sm rounded-2xl shadow-2xl border border-slate-200 p-5 space-y-4">
+            <div class="text-center">
+              <div class="w-12 h-12 rounded-2xl bg-blue-900 text-white flex items-center justify-center font-bold text-xl mx-auto mb-2">
+                🏛️
+              </div>
+              <h2 class="font-black text-base text-slate-900">Officer Onboarding</h2>
+              <p class="text-xs text-slate-500">Configure your banking profile. Leads and cloud backups are synced to your Employee ID.</p>
+            </div>
+
+            <div class="space-y-3 text-xs">
+              <div>
+                <label class="block font-semibold text-slate-600 mb-1">Officer Full Name *</label>
+                <input type="text" id="ob-name" placeholder="e.g. Muhammad Usman" class="w-full px-3 py-2 bg-slate-50 border rounded-lg font-bold" />
+              </div>
+              <div>
+                <label class="block font-semibold text-slate-600 mb-1">Employee / Staff ID * (Enables Cloud Restore)</label>
+                <input type="text" id="ob-staff" placeholder="e.g. RO-8942" class="w-full px-3 py-2 bg-slate-50 border rounded-lg font-bold" />
+              </div>
+              <div>
+                <label class="block font-semibold text-slate-600 mb-1">Branch Name *</label>
+                <input type="text" id="ob-branch" placeholder="e.g. Peshawar Branch" class="w-full px-3 py-2 bg-slate-50 border rounded-lg font-bold" />
+              </div>
+            </div>
+
+            <button onclick="saveOnboardingProfile()" class="w-full py-2.5 bg-blue-700 hover:bg-blue-800 text-white font-bold rounded-xl text-xs shadow-md">
+              Start Application
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    function saveOnboardingProfile() {
+      const name = document.getElementById("ob-name").value.trim();
+      const staff = document.getElementById("ob-staff").value.trim();
+      const branch = document.getElementById("ob-branch").value.trim();
+      if (!name || !staff || !branch) return showToast("Please fill all required profile fields", "warning");
+
+      appState.profile.officerName = name;
+      appState.profile.staffId = staff;
+      appState.profile.branchName = branch;
+      appState.profile.isOnboarded = true;
+      saveState();
+
+      restoreCloudBackupForOfficer(staff);
+      autoFetchGlobalProducts();
+
+      appState.showOnboarding = false;
+      showToast("Profile configured successfully", "success");
+      renderApp();
+    }
+
+    function renderProfileModal() {
+      return `
+        <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 z-50">
+          <div class="bg-white w-full max-w-sm rounded-2xl shadow-2xl border border-slate-200 p-5 space-y-3">
+            <h3 class="font-extrabold text-sm text-slate-900">Officer Profile Settings</h3>
+            <div class="space-y-2 text-xs">
+              <div>
+                <label class="block text-slate-500 font-semibold mb-1">Officer Name</label>
+                <input type="text" id="prof-name" value="${appState.profile.officerName}" class="w-full px-3 py-1.5 bg-slate-50 border rounded-lg font-bold" />
+              </div>
+              <div>
+                <label class="block text-slate-500 font-semibold mb-1">Staff / Employee ID</label>
+                <input type="text" id="prof-staff" value="${appState.profile.staffId}" class="w-full px-3 py-1.5 bg-slate-50 border rounded-lg font-bold" />
+              </div>
+              <div>
+                <label class="block text-slate-500 font-semibold mb-1">Branch Name</label>
+                <input type="text" id="prof-branch" value="${appState.profile.branchName}" class="w-full px-3 py-1.5 bg-slate-50 border rounded-lg font-bold" />
+              </div>
+            </div>
+
+            <div class="pt-2 border-t flex flex-col space-y-2">
+              <button onclick="restoreCloudBackupForOfficer(document.getElementById('prof-staff').value.trim());" class="w-full py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-xs font-bold">
+                ☁️ Restore Cloud Leads by Employee ID
+              </button>
+              <div class="flex space-x-2">
+                <button onclick="appState.showProfileDialog = false; renderApp();" class="flex-1 py-2 bg-slate-200 text-slate-700 rounded-lg text-xs font-bold">Cancel</button>
+                <button onclick="updateProfileSettings()" class="flex-1 py-2 bg-blue-700 text-white rounded-lg text-xs font-bold">Save</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function updateProfileSettings() {
+      appState.profile.officerName = document.getElementById("prof-name").value.trim();
+      appState.profile.staffId = document.getElementById("prof-staff").value.trim();
+      appState.profile.branchName = document.getElementById("prof-branch").value.trim();
+      saveState();
+      appState.showProfileDialog = false;
+      showToast("Profile settings saved", "success");
+      renderApp();
+    }
+
+    function renderAdminAuthModal() {
+      return `
+        <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 z-50">
+          <div class="bg-white w-full max-w-xs rounded-2xl shadow-2xl border border-slate-200 p-5 space-y-3">
+            <h3 class="font-extrabold text-sm text-slate-900 text-center">Admin Verification</h3>
+            <p class="text-xs text-slate-500 text-center">Enter Admin Password to manage SOC slabs.</p>
+            <input type="password" id="admin-pin-input" placeholder="••••••••" 
+              class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg outline-none text-center font-bold text-lg tracking-widest" />
+            <div class="flex space-x-2 pt-1">
+              <button onclick="appState.showAdminAuth = false; renderApp();" class="flex-1 py-2 bg-slate-200 text-slate-700 rounded-lg text-xs font-bold">Cancel</button>
+              <button onclick="verifyAdminPin()" class="flex-1 py-2 bg-blue-700 text-white rounded-lg text-xs font-bold">Unlock</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function verifyAdminPin() {
+      const entered = document.getElementById("admin-pin-input").value;
+      if (entered === (appState.profile.adminPin || "Admin123")) {
+        appState.isAdminUnlocked = true;
+        appState.showAdminAuth = false;
+        appState.activeTab = "admin";
+        showToast("Admin session unlocked", "success");
+      } else {
+        showToast("Incorrect Admin Password!", "error");
+      }
+      renderApp();
+    }
+
+    function renderChangePasswordModal() {
+      return `
+        <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 z-50">
+          <div class="bg-white w-full max-w-xs rounded-2xl shadow-2xl border border-slate-200 p-5 space-y-3">
+            <h3 class="font-extrabold text-sm text-slate-900">Update Admin Password</h3>
+            <input type="password" id="old-pin" placeholder="Current Password" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg outline-none text-xs" />
+            <input type="password" id="new-pin" placeholder="New Password" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg outline-none text-xs" />
+            <div class="flex space-x-2 pt-1">
+              <button onclick="appState.showChangePassword = false; renderApp();" class="flex-1 py-2 bg-slate-200 text-slate-700 rounded-lg text-xs font-bold">Cancel</button>
+              <button onclick="submitChangePassword()" class="flex-1 py-2 bg-blue-700 text-white rounded-lg text-xs font-bold">Update</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function submitChangePassword() {
+      const oldP = document.getElementById("old-pin").value;
+      const newP = document.getElementById("new-pin").value;
+      if (oldP !== (appState.profile.adminPin || "Admin123")) {
+        return showToast("Current password incorrect!", "error");
+      }
+      if (newP.length < 4) {
+        return showToast("Password must be at least 4 characters", "warning");
+      }
+      appState.profile.adminPin = newP;
+      appState.showChangePassword = false;
+      saveState();
+      showToast("Admin password successfully updated!", "success");
+      renderApp();
+    }
+
+    function openProductEditModal(productId) {
+      if (productId) {
+        appState.editingProduct = JSON.parse(JSON.stringify(appState.products.find(x => x.id === productId)));
+      } else {
+        appState.editingProduct = {
+          id: "prod-kb-" + Date.now(),
+          name: "New Loan Facility",
+          rateType: "reducing",
+          defaultAnnualRate: 20.0,
+          minAmount: 50000,
+          maxAmount: 5000000,
+          minTenure: 1,
+          maxTenure: 120,
+          minAge: 21,
+          maxAgeAtMaturity: 65,
+          feeType: "percentage",
+          defaultFeeValue: 1.5,
+          rateSlabs: [],
+          feeSlabs: []
+        };
+      }
+      appState.showProductEdit = true;
+      renderApp();
+    }
+
+    function addRateSlabToEditingProduct() {
+      if (!appState.editingProduct.rateSlabs) appState.editingProduct.rateSlabs = [];
+      appState.editingProduct.rateSlabs.push({
+        minAmount: 50000,
+        maxAmount: 200000,
+        annualRate: appState.editingProduct.defaultAnnualRate || 22.0
+      });
+      renderApp();
+    }
+
+    function removeRateSlabFromEditingProduct(index) {
+      appState.editingProduct.rateSlabs.splice(index, 1);
+      renderApp();
+    }
+
+    function addFeeSlabToEditingProduct() {
+      if (!appState.editingProduct.feeSlabs) appState.editingProduct.feeSlabs = [];
+      appState.editingProduct.feeSlabs.push({
+        minAmount: 50000,
+        maxAmount: 200000,
+        feeType: "whichever_higher",
+        feeValue: 1.5,
+        minFee: 3500,
+        maxFee: 7500
+      });
+      renderApp();
+    }
+
+    function removeFeeSlabFromEditingProduct(index) {
+      appState.editingProduct.feeSlabs.splice(index, 1);
+      renderApp();
+    }
+
+    function renderProductEditModal() {
+      const p = appState.editingProduct;
+      if (!p) return '';
+      return `
+        <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 z-50 overflow-y-auto">
+          <div class="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 p-5 space-y-4 max-h-[92vh] overflow-y-auto">
+            <div class="flex justify-between items-center border-b pb-2">
+              <h3 class="font-extrabold text-sm text-slate-900">Configure Loan Facility & Multi-Tier Slabs</h3>
+              <button onclick="appState.showProductEdit = false; renderApp();" class="text-slate-400 hover:text-slate-700 font-bold">✕</button>
+            </div>
+
+            <div class="space-y-3 text-xs">
+              <div>
+                <label class="block font-semibold text-slate-600 mb-1">Facility Name *</label>
+                <input type="text" value="${p.name}" oninput="appState.editingProduct.name = this.value;" class="w-full px-3 py-1.5 bg-slate-50 border rounded-lg font-bold" />
+              </div>
+
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="block font-semibold text-slate-600 mb-1">Rate Type</label>
+                  <select onchange="appState.editingProduct.rateType = this.value; renderApp();" class="w-full px-3 py-1.5 bg-slate-50 border rounded-lg font-bold">
+                    <option value="reducing" ${p.rateType === 'reducing' ? 'selected' : ''}>Reducing Balance</option>
+                    <option value="flat" ${p.rateType === 'flat' ? 'selected' : ''}>Flat Rate %</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block font-semibold text-slate-600 mb-1">Base Interest Rate %</label>
+                  <input type="number" step="0.25" value="${p.defaultAnnualRate}" oninput="appState.editingProduct.defaultAnnualRate = Number(this.value);" class="w-full px-3 py-1.5 bg-slate-50 border rounded-lg font-bold" />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="block font-semibold text-slate-600 mb-1">Min Loan Principal (PKR)</label>
+                  <input type="number" value="${p.minAmount}" oninput="appState.editingProduct.minAmount = Number(this.value);" class="w-full px-3 py-1.5 bg-slate-50 border rounded-lg" />
+                </div>
+                <div>
+                  <label class="block font-semibold text-slate-600 mb-1">Max Loan Principal (PKR)</label>
+                  <input type="number" value="${p.maxAmount}" oninput="appState.editingProduct.maxAmount = Number(this.value);" class="w-full px-3 py-1.5 bg-slate-50 border rounded-lg" />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="block font-semibold text-slate-600 mb-1">Tenure Range (Months)</label>
+                  <div class="flex space-x-1">
+                    <input type="number" placeholder="Min" value="${p.minTenure}" oninput="appState.editingProduct.minTenure = Number(this.value);" class="w-1/2 px-2 py-1.5 bg-slate-50 border rounded-lg" />
+                    <input type="number" placeholder="Max" value="${p.maxTenure}" oninput="appState.editingProduct.maxTenure = Number(this.value);" class="w-1/2 px-2 py-1.5 bg-slate-50 border rounded-lg" />
+                  </div>
+                </div>
+                <div>
+                  <label class="block font-semibold text-slate-600 mb-1">Customer Age Eligibility</label>
+                  <div class="flex space-x-1">
+                    <input type="number" placeholder="Min" value="${p.minAge}" oninput="appState.editingProduct.minAge = Number(this.value);" class="w-1/2 px-2 py-1.5 bg-slate-50 border rounded-lg" />
+                    <input type="number" placeholder="Max Maturity" value="${p.maxAgeAtMaturity}" oninput="appState.editingProduct.maxAgeAtMaturity = Number(this.value);" class="w-1/2 px-2 py-1.5 bg-slate-50 border rounded-lg" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- SECTION A: Multi-Tier Interest Rate Slabs -->
+            <div class="bg-blue-50/70 p-3 rounded-xl border border-blue-200 space-y-2 text-xs">
+              <div class="flex justify-between items-center">
+                <div>
+                  <h4 class="font-extrabold text-blue-900 uppercase text-[11px]">Multi-Tier Interest Rate Slabs</h4>
+                  <p class="text-[10px] text-blue-700">Amount-based rate tiers (e.g. 50k-100k = 39%, 100k-300k = 37%)</p>
+                </div>
+                <button type="button" onclick="addRateSlabToEditingProduct()" class="px-2.5 py-1 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-bold shadow-xs">
+                  + Add Rate Slab
+                </button>
+              </div>
+
+              ${(p.rateSlabs || []).length === 0 ? '<p class="text-[10px] text-slate-500 italic">No amount-based rate slabs added. Base rate applies.</p>' : ''}
+
+              <div class="space-y-1.5">
+                ${(p.rateSlabs || []).map((slab, i) => `
+                  <div class="flex items-center space-x-1.5 bg-white p-2 rounded-lg border border-blue-200">
+                    <div class="flex-1">
+                      <span class="text-[9px] text-slate-400 block font-semibold">Min Amount (PKR)</span>
+                      <input type="number" value="${slab.minAmount}" oninput="appState.editingProduct.rateSlabs[${i}].minAmount = Number(this.value);" class="w-full px-2 py-1 bg-slate-50 border rounded text-xs font-bold" />
+                    </div>
+                    <div class="flex-1">
+                      <span class="text-[9px] text-slate-400 block font-semibold">Max Amount (PKR)</span>
+                      <input type="number" value="${slab.maxAmount}" oninput="appState.editingProduct.rateSlabs[${i}].maxAmount = Number(this.value);" class="w-full px-2 py-1 bg-slate-50 border rounded text-xs font-bold" />
+                    </div>
+                    <div class="w-24">
+                      <span class="text-[9px] text-slate-400 block font-semibold">Rate % APR</span>
+                      <input type="number" step="0.25" value="${slab.annualRate}" oninput="appState.editingProduct.rateSlabs[${i}].annualRate = Number(this.value);" class="w-full px-2 py-1 bg-slate-50 border rounded text-xs font-extrabold text-blue-900" />
+                    </div>
+                    <button type="button" onclick="removeRateSlabFromEditingProduct(${i})" class="text-rose-600 hover:text-rose-800 p-1 text-xs font-bold">🗑️</button>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+
+            <!-- SECTION B: Multi-Tier Processing Fee Slabs -->
+            <div class="bg-emerald-50/70 p-3 rounded-xl border border-emerald-200 space-y-2 text-xs">
+              <div class="flex justify-between items-center">
+                <div>
+                  <h4 class="font-extrabold text-emerald-900 uppercase text-[11px]">Multi-Tier Processing Fee Slabs</h4>
+                  <p class="text-[10px] text-emerald-700">% vs Min Fixed vs Max Fixed ("Whichever is higher" rule)</p>
+                </div>
+                <button type="button" onclick="addFeeSlabToEditingProduct()" class="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold shadow-xs">
+                  + Add Fee Slab
+                </button>
+              </div>
+
+              ${(p.feeSlabs || []).length === 0 ? '<p class="text-[10px] text-slate-500 italic">No amount-based fee slabs added. Base fee applies.</p>' : ''}
+
+              <div class="space-y-1.5">
+                ${(p.feeSlabs || []).map((slab, i) => `
+                  <div class="bg-white p-2 rounded-lg border border-emerald-200 space-y-1">
+                    <div class="flex items-center space-x-1.5">
+                      <div class="flex-1">
+                        <span class="text-[9px] text-slate-400 block font-semibold">Min Amount</span>
+                        <input type="number" value="${slab.minAmount}" oninput="appState.editingProduct.feeSlabs[${i}].minAmount = Number(this.value);" class="w-full px-2 py-1 bg-slate-50 border rounded text-xs" />
+                      </div>
+                      <div class="flex-1">
+                        <span class="text-[9px] text-slate-400 block font-semibold">Max Amount</span>
+                        <input type="number" value="${slab.maxAmount}" oninput="appState.editingProduct.feeSlabs[${i}].maxAmount = Number(this.value);" class="w-full px-2 py-1 bg-slate-50 border rounded text-xs" />
+                      </div>
+                      <div class="w-28">
+                        <span class="text-[9px] text-slate-400 block font-semibold">Calculation Type</span>
+                        <select onchange="appState.editingProduct.feeSlabs[${i}].feeType = this.value; renderApp();" class="w-full px-1 py-1 bg-slate-50 border rounded text-xs font-bold">
+                          <option value="whichever_higher" ${slab.feeType === 'whichever_higher' ? 'selected' : ''}>Higher Of (% vs Min)</option>
+                          <option value="percentage" ${slab.feeType === 'percentage' ? 'selected' : ''}>Pure % (Min/Max)</option>
+                          <option value="fixed" ${slab.feeType === 'fixed' ? 'selected' : ''}>Fixed Amount</option>
+                        </select>
+                      </div>
+                      <button type="button" onclick="removeFeeSlabFromEditingProduct(${i})" class="text-rose-600 hover:text-rose-800 p-1 text-xs font-bold">🗑️</button>
+                    </div>
+                    <div class="flex items-center space-x-1.5 pt-1 border-t border-slate-100">
+                      <div class="flex-1">
+                        <span class="text-[9px] text-slate-400 block font-semibold">${slab.feeType === 'fixed' ? 'Fixed Fee (Rs)' : 'Fee % Value'}</span>
+                        <input type="number" step="0.1" value="${slab.feeValue}" oninput="appState.editingProduct.feeSlabs[${i}].feeValue = Number(this.value);" class="w-full px-2 py-1 bg-slate-50 border rounded text-xs font-bold" />
+                      </div>
+                      <div class="flex-1">
+                        <span class="text-[9px] text-slate-400 block font-semibold">Min Fixed Floor (Rs)</span>
+                        <input type="number" value="${slab.minFee || 0}" oninput="appState.editingProduct.feeSlabs[${i}].minFee = Number(this.value);" class="w-full px-2 py-1 bg-slate-50 border rounded text-xs" />
+                      </div>
+                      <div class="flex-1">
+                        <span class="text-[9px] text-slate-400 block font-semibold">Max Fixed Cap (Rs)</span>
+                        <input type="number" value="${slab.maxFee || 0}" oninput="appState.editingProduct.feeSlabs[${i}].maxFee = Number(this.value);" placeholder="0 = No Cap" class="w-full px-2 py-1 bg-slate-50 border rounded text-xs" />
+                      </div>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+
+            <div class="flex justify-end space-x-2 pt-2 border-t">
+              <button onclick="appState.showProductEdit = false; renderApp();" class="px-3 py-1.5 bg-slate-200 text-slate-700 rounded-lg text-xs font-bold">Cancel</button>
+              <button onclick="saveProductModal()" class="px-4 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-bold shadow-xs">Save Facility</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function saveProductModal() {
+      const p = appState.editingProduct;
+      const idx = appState.products.findIndex(x => x.id === p.id);
+      if (idx >= 0) appState.products[idx] = p;
+      else appState.products.push(p);
+
+      saveState();
+      appState.showProductEdit = false;
+      showToast("Facility & Slabs saved and synced to database", "success");
+      renderApp();
+    }
+
+    function deleteProduct(id) {
+      if (appState.products.length <= 1) return showToast("At least one facility must remain", "warning");
+      if (confirm("Delete this facility?")) {
+        appState.products = appState.products.filter(x => x.id !== id);
+        saveState();
+        renderApp();
+      }
+    }
+
+    // --- 6. INITIALIZE ---
+    window.addEventListener("online", () => {
+      appState.online = true;
+      showToast("Network connected • Online", "success");
+      renderApp();
+    });
+    window.addEventListener("offline", () => {
+      appState.online = false;
+      showToast("Internet disconnected • Working Offline", "warning");
+      renderApp();
+    });
+
+    document.addEventListener("DOMContentLoaded", () => {
+      autoFetchGlobalProducts();
+      renderApp();
+    });
+  </script>
+</body>
+</html>
