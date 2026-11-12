@@ -63,6 +63,8 @@ body {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 6px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .brand-title {
@@ -77,6 +79,12 @@ body {
 .brand-icon {
   width: 28px;
   height: 28px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .sync-badge {
@@ -108,6 +116,9 @@ body {
   color: #BFDBFE;
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
 }
 
 /* PWA Install Banner */
@@ -426,12 +437,15 @@ input:checked + .slider:before {
   display: flex;
   gap: 6px;
   margin-top: 8px;
+  flex-wrap: wrap;
 }
 
 .lead-actions .btn {
   height: 36px;
   font-size: 0.78rem;
   padding: 0 10px;
+  flex: 1;
+  min-width: 75px;
 }
 
 /* Modal Dialogs */
@@ -553,4 +567,170 @@ input:checked + .slider:before {
 
 .amort-table tr:hover {
   background: #F8FAFC;
+}
+
+/* Google Sign In & User Profile Chip */
+.google-auth-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: white;
+  color: #1F2937;
+  font-weight: 600;
+  font-size: 0.82rem;
+  padding: 6px 12px;
+  border-radius: 20px;
+  border: 1px solid #D1D5DB;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+}
+
+.google-auth-btn:hover {
+  background: #F9FAFB;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.google-auth-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.15);
+  padding: 3px 10px 3px 4px;
+  border-radius: 24px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  backdrop-filter: blur(4px);
+}
+
+.user-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1.5px solid white;
+  object-fit: cover;
+  background-color: var(--primary-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 0.75rem;
+}
+
+.btn-signout {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #FEE2E2;
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* Quick Action Buttons (WhatsApp, SMS, Call) */
+.btn-whatsapp {
+  background: #25D366 !important;
+  color: white !important;
+}
+
+.btn-whatsapp:active {
+  background: #1EBE5B !important;
+}
+
+.btn-sms {
+  background: #0284C7 !important;
+  color: white !important;
+}
+
+.btn-call {
+  background: #F59E0B !important;
+  color: white !important;
+}
+
+/* Access Denied Fullscreen Overlay */
+.access-denied-screen {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  color: white;
+  text-align: center;
+}
+
+.access-denied-screen.active {
+  display: flex;
+}
+
+.access-card {
+  background: #1E293B;
+  border: 1.5px solid #EF4444;
+  border-radius: 16px;
+  padding: 28px 20px;
+  max-width: 440px;
+  width: 100%;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+}
+
+.access-icon {
+  font-size: 3.2rem;
+  margin-bottom: 14px;
+}
+
+.access-title {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: #F87171;
+  margin-bottom: 8px;
+}
+
+.access-subtitle {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #E2E8F0;
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+.access-details {
+  background: #0F172A;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 0.8rem;
+  color: #94A3B8;
+  margin-bottom: 18px;
+  text-align: left;
+}
+
+/* Product Management in Settings & Modal */
+.product-manage-item {
+  background: #F8FAFC;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.product-manage-info h4 {
+  font-size: 0.9rem;
+  color: var(--text-main);
+  margin-bottom: 2px;
+}
+
+.product-manage-info p {
+  font-size: 0.78rem;
+  color: var(--text-muted);
 }

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>KB Loan Calculator & CRM</title>
-  <meta name="description" content="Bank Loan & Deposit Calculator with Lead Management and Google Sheets Offline Sync">
+  <meta name="description" content="Bank Loan & Deposit Calculator with Lead Management, Google Sign-In, and Firebase Real-time Sync">
 
   <!-- PWA & Apple Mobile Web App Metas -->
   <link rel="manifest" href="./manifest.json">
@@ -17,6 +17,27 @@
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
+  <!-- ACCESS RESTRICTED SCREEN (BLOCKED USER GATE) -->
+  <div class="access-denied-screen" id="accessDeniedScreen">
+    <div class="access-card">
+      <div class="access-icon">🚫</div>
+      <div class="access-title">Access Restricted</div>
+      <div class="access-subtitle">آپ کا اکاؤنٹ ایڈمن کی منظوری کا منتظر ہے یا غیر فعال ہے</div>
+      <div class="access-details" id="accessDetailsBox">
+        <div><strong>User:</strong> <span id="deniedUserEmail">Loading...</span></div>
+        <div style="margin-top: 3px;"><strong>UID:</strong> <span id="deniedUserUid" style="font-size: 0.75rem;">...</span></div>
+        <div style="margin-top: 6px; color: #F87171; font-weight: 700;">Status: Account Inactive / Blocked in Firestore</div>
+      </div>
+      <p style="font-size: 0.84rem; color: #94A3B8; margin-bottom: 18px; line-height: 1.5;">
+        برائے مہربانی ایپ استعمال کرنے کے لیے اپنے برانچ مینیجر یا ایڈمنسٹریٹر سے رابطہ کریں تاکہ وہ آپ کے اکاؤنٹ کو فعال کر سکیں۔
+      </p>
+      <div class="btn-group">
+        <button type="button" class="btn btn-outline" onclick="signOutUser()" style="color: white; border-color: #64748B;">Sign Out / لاگ آؤٹ</button>
+        <button type="button" class="btn btn-success" onclick="checkUserAccessAgain()">🔄 Refresh Status</button>
+      </div>
+    </div>
+  </div>
+
   <div class="app-wrapper">
     <!-- Header -->
     <header class="app-header">
@@ -27,11 +48,28 @@
           </svg>
           <span>KB Calculator & CRM</span>
         </div>
-        <div class="sync-badge" id="onlineBadge" onclick="manualSync()">
-          <span class="status-dot" id="statusDot"></span>
-          <span id="statusText">Online</span>
+
+        <div class="header-actions">
+          <!-- Google Sign-In Container -->
+          <div id="authContainer">
+            <button type="button" class="google-auth-btn" id="googleSignInBtn" onclick="signInWithGoogle()">
+              <svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+              <span>Sign In</span>
+            </button>
+            <div class="user-chip" id="userProfileChip" style="display: none;">
+              <img id="userAvatarImg" class="user-avatar" src="" alt="Avatar" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'%23FFFFFF\'%3E%3Cpath d=\'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z\'/%3E%3C/svg%3E'">
+              <span id="userNameSpan">User</span>
+              <button type="button" class="btn-signout" onclick="signOutUser()">Sign Out</button>
+            </div>
+          </div>
+
+          <div class="sync-badge" id="onlineBadge" onclick="manualSync()">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">Online</span>
+          </div>
         </div>
       </div>
+
       <div class="officer-subbar">
         <span id="officerBadge">👤 Officer: Loan Officer (RO)</span>
         <span id="branchBadge">🏢 Main Branch</span>
@@ -41,7 +79,7 @@
     <!-- iOS / Android Home Screen Install Banner -->
     <div class="install-banner" id="pwaBanner">
       <span>📲 Add this app to your Home Screen for instant offline access!</span>
-      <button onclick="showInstallHelp()">How to Add</button>
+      <button type="button" onclick="showInstallHelp()">How to Add</button>
     </div>
 
     <!-- Navigation Tabs -->
@@ -73,9 +111,12 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="productSelect">Select Product</label>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <label class="form-label" for="productSelect" style="margin-bottom: 0;">Select Product</label>
+            <span id="firestoreProductSyncBadge" style="font-size: 0.72rem; color: var(--success); font-weight: 600;">⚡ Firestore Live</span>
+          </div>
           <select class="form-select" id="productSelect" onchange="onProductChange()">
-            <!-- Populated via JS -->
+            <!-- Populated via JS / Firestore -->
           </select>
         </div>
 
@@ -160,9 +201,12 @@
           </div>
         </div>
 
+        <!-- Action Buttons -->
         <div class="btn-group">
-          <button type="button" class="btn btn-primary" onclick="saveLeadFromCalculator()">💾 Save Lead to Phone</button>
-          <button type="button" class="btn btn-outline" id="amortBtn" onclick="openAmortizationModal()">📋 Amortization</button>
+          <button type="button" class="btn btn-primary" onclick="saveLeadFromCalculator()">💾 Save Lead</button>
+          <button type="button" class="btn btn-whatsapp" onclick="sendQuotationWhatsApp()">💬 WhatsApp</button>
+          <button type="button" class="btn btn-sms" onclick="sendQuotationSMS()">✉️ SMS</button>
+          <button type="button" class="btn btn-outline" id="amortBtn" onclick="openAmortizationModal()">📋 Amort</button>
         </div>
       </div>
     </main>
@@ -176,9 +220,17 @@
         <div class="form-group">
           <input type="text" class="form-input" id="searchLeadsInput" placeholder="Search by name, phone or product..." oninput="renderLeads()">
         </div>
+
+        <!-- Dual Filters: Branch and Status -->
         <div class="form-row">
           <div class="form-group">
-            <label class="form-label">Status Filter</label>
+            <label class="form-label" for="branchFilterSelect">🏢 Branch Filter</label>
+            <select class="form-select" id="branchFilterSelect" onchange="renderLeads()">
+              <option value="All">All Branches</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="statusFilterSelect">Status Filter</label>
             <select class="form-select" id="statusFilterSelect" onchange="renderLeads()">
               <option value="All">All Statuses</option>
               <option value="New">New</option>
@@ -188,11 +240,12 @@
               <option value="Lost">Lost</option>
             </select>
           </div>
-          <div class="form-group" style="display: flex; align-items: flex-end;">
-            <button type="button" class="btn btn-success" onclick="manualSync()" style="height: 44px;">
-              🔄 Sync Sheet
-            </button>
-          </div>
+        </div>
+
+        <div class="btn-group">
+          <button type="button" class="btn btn-success" onclick="manualSync()" style="height: 42px;">
+            🔄 Sync Google Sheet & Firestore
+          </button>
         </div>
       </div>
 
@@ -203,6 +256,29 @@
 
     <!-- TAB 3: SETTINGS -->
     <section class="tab-content" id="settingsTab">
+      <!-- Google Account & Access Status Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>🔐</span> Google Sign-In & Security Access
+        </div>
+        <div class="result-row">
+          <span>Signed-In Email:</span>
+          <strong id="settingsUserEmail">Not signed in</strong>
+        </div>
+        <div class="result-row">
+          <span>Access Status:</span>
+          <strong id="settingsAccessStatus" style="color: var(--success);">Authorized (Active)</strong>
+        </div>
+        <div class="result-row">
+          <span>User Role:</span>
+          <strong id="settingsUserRole">Loan Officer</strong>
+        </div>
+        <div class="btn-group" style="margin-top: 10px;">
+          <button type="button" class="btn btn-outline" id="settingsAuthBtn" onclick="toggleAuthAction()">🔑 Sign In with Google</button>
+        </div>
+      </div>
+
+      <!-- Officer Profile Card -->
       <div class="card">
         <div class="card-title">
           <span>👤</span> Officer Profile & Branch
@@ -221,9 +297,24 @@
           <label class="form-label" for="settingsBranch">Assigned Branch</label>
           <input type="text" class="form-input" id="settingsBranch" placeholder="Peshawar Branch">
         </div>
-        <button type="button" class="btn btn-primary" onclick="saveSettings()">Save Profile</button>
+        <button type="button" class="btn btn-primary" onclick="saveSettings()">Save Profile & Sync to Cloud</button>
       </div>
 
+      <!-- Products Management & Firestore Sync Card -->
+      <div class="card">
+        <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>🏷️ Bank Products & Rate Configuration</span>
+          <button type="button" class="btn btn-accent" onclick="openNewProductModal()" style="height: 32px; font-size: 0.75rem; padding: 0 10px; width: auto;">➕ New Product</button>
+        </div>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
+          All changes here write directly to Firestore (<code style="background: #E2E8F0; padding: 2px 4px; border-radius: 4px;">products</code> collection) and auto-sync in real-time across both Android and Web apps.
+        </p>
+        <div id="productsManageList">
+          <!-- Populated dynamically via Firestore -->
+        </div>
+      </div>
+
+      <!-- Google Sheets Webhook Integration Card -->
       <div class="card">
         <div class="card-title">
           <span>🔗</span> Google Sheets Webhook Integration
@@ -241,6 +332,7 @@
         </div>
       </div>
 
+      <!-- Offline Cache & Data Management Card -->
       <div class="card">
         <div class="card-title">
           <span>💾</span> Offline Cache & Data Management
@@ -257,14 +349,14 @@
           <button type="button" class="btn btn-outline" onclick="exportLeadsJson()">📥 Backup Leads (JSON)</button>
         </div>
       </div>
-    </main>
+    </section>
 
     <!-- MODAL 1: CUSTOMER APPROACH TRACK RECORD -->
     <div class="modal-overlay" id="trackRecordModal">
       <div class="modal-dialog">
         <div class="modal-header">
           <div class="modal-title">📜 Customer Approach Track Record</div>
-          <button class="modal-close" onclick="closeModal('trackRecordModal')">&times;</button>
+          <button type="button" class="modal-close" onclick="closeModal('trackRecordModal')">&times;</button>
         </div>
         <div class="modal-body">
           <div id="trackRecordCustomerHeader" style="margin-bottom: 12px; font-size: 0.85rem; color: var(--text-muted);"></div>
@@ -278,14 +370,14 @@
       <div class="modal-dialog">
         <div class="modal-header">
           <div class="modal-title">📝 Edit Note / Comment</div>
-          <button class="modal-close" onclick="closeModal('editNoteModal')">&times;</button>
+          <button type="button" class="modal-close" onclick="closeModal('editNoteModal')">&times;</button>
         </div>
         <div class="modal-body">
           <div class="form-group">
             <label class="form-label" id="editNoteCustName"></label>
             <textarea class="form-textarea" id="editNoteTextarea" style="min-height: 120px;"></textarea>
           </div>
-          <button type="button" class="btn btn-primary" onclick="confirmSaveNote()">Save Note</button>
+          <button type="button" class="btn btn-primary" onclick="confirmSaveNote()">Save Note & Sync</button>
         </div>
       </div>
     </div>
@@ -295,7 +387,7 @@
       <div class="modal-dialog">
         <div class="modal-header">
           <div class="modal-title">📅 Schedule Follow-Up Date</div>
-          <button class="modal-close" onclick="closeModal('followUpModal')">&times;</button>
+          <button type="button" class="modal-close" onclick="closeModal('followUpModal')">&times;</button>
         </div>
         <div class="modal-body">
           <div class="form-group">
@@ -315,7 +407,7 @@
       <div class="modal-dialog" style="max-width: 580px;">
         <div class="modal-header">
           <div class="modal-title">📋 Payment & Amortization Schedule</div>
-          <button class="modal-close" onclick="closeModal('amortizationModal')">&times;</button>
+          <button type="button" class="modal-close" onclick="closeModal('amortizationModal')">&times;</button>
         </div>
         <div class="modal-body">
           <div class="table-wrapper">
@@ -336,12 +428,80 @@
       </div>
     </div>
 
-    <!-- MODAL 5: INSTALLATION GUIDE -->
+    <!-- MODAL 5: PRODUCT EDIT / CONFIGURE MODAL -->
+    <div class="modal-overlay" id="editProductModal">
+      <div class="modal-dialog" style="max-width: 540px;">
+        <div class="modal-header">
+          <div class="modal-title" id="editProductModalTitle">⚙️ Edit Product Configuration</div>
+          <button type="button" class="modal-close" onclick="closeModal('editProductModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="prodEditId">
+          <div class="form-group">
+            <label class="form-label">Product Name</label>
+            <input type="text" class="form-input" id="prodEditName" placeholder="e.g. KPF Gen Salary NonTrans-3138">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Category</label>
+              <select class="form-select" id="prodEditCategory">
+                <option value="asset">Asset (Loan)</option>
+                <option value="liability">Liability (Deposit)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Pricing Type</label>
+              <select class="form-select" id="prodEditRateType">
+                <option value="reducing">Reducing Balance</option>
+                <option value="flat">Flat Rate</option>
+                <option value="fixed">Fixed Rate</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Default Annual Rate (%)</label>
+              <input type="number" step="0.01" class="form-input" id="prodEditRate" placeholder="39.5">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Processing Fee (%)</label>
+              <input type="number" step="0.01" class="form-input" id="prodEditFee" placeholder="1.5">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Min Amount (PKR)</label>
+              <input type="number" class="form-input" id="prodEditMinAmount" placeholder="50000">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Max Amount (PKR)</label>
+              <input type="number" class="form-input" id="prodEditMaxAmount" placeholder="500000">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Min Tenure (Mo)</label>
+              <input type="number" class="form-input" id="prodEditMinTenure" placeholder="3">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Max Tenure (Mo)</label>
+              <input type="number" class="form-input" id="prodEditMaxTenure" placeholder="36">
+            </div>
+          </div>
+          <div class="btn-group" style="margin-top: 14px;">
+            <button type="button" class="btn btn-primary" onclick="confirmSaveProduct()">💾 Save to Firestore</button>
+            <button type="button" class="btn btn-outline" onclick="closeModal('editProductModal')">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 6: INSTALLATION GUIDE -->
     <div class="modal-overlay" id="installGuideModal">
       <div class="modal-dialog">
         <div class="modal-header">
           <div class="modal-title">📲 Install App to Home Screen</div>
-          <button class="modal-close" onclick="closeModal('installGuideModal')">&times;</button>
+          <button type="button" class="modal-close" onclick="closeModal('installGuideModal')">&times;</button>
         </div>
         <div class="modal-body" style="font-size: 0.88rem; line-height: 1.5;">
           <h4 style="color: var(--primary); margin-bottom: 6px;">🍎 iPhone (Apple iOS / Safari):</h4>
@@ -361,6 +521,11 @@
       </div>
     </div>
   </div>
+
+  <!-- FIREBASE WEB COMPAT SDKS -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
   <script src="./app.js"></script>
 </body>
