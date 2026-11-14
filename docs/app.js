@@ -1,40 +1,29 @@
 /**
  * KB Loan Calculator & Lead CRM - Standalone PWA Engine
  * Complete offline-first calculator, IndexedDB persistence, Firebase Auth (Google Sign-In),
- * real-time Firestore synchronization (Products & Leads), branch filtering for iPhone/Web,
+ * real-time Firestore synchronization (Named DB parity with Android), branch filtering for iPhone/Web,
  * Allow/Deny user access control, WhatsApp/SMS quotations, and Google Sheets in-place sync.
  */
 
-// 1. FIREBASE INITIALIZATION & CONFIGURATION
-const firebaseConfig = {
-  apiKey: "AIzaSyBH27yZeI9YVi0Ik1FoHFLDoO3PMjhPPnw",
-  authDomain: "gen-lang-client-0150363642.firebaseapp.com",
-  projectId: "gen-lang-client-0150363642",
-  storageBucket: "gen-lang-client-0150363642.firebasestorage.app",
-  messagingSenderId: "184681541597",
-  appId: "1:184681541597:android:e6b9e900f639d026fb1034"
-};
-
-let auth = null;
-let db = null;
+// 1. FIREBASE BRIDGE STATE
+let fb = null;
 let currentUser = null;
 let currentUserProfile = null;
+let firebaseInitialized = false;
 let unsubscribeProducts = null;
 let unsubscribeLeads = null;
+let unsubscribeGlobalConfig = null;
+let unsubscribeUserDoc = null;
 
-try {
-  if (typeof firebase !== 'undefined') {
-    firebase.initializeApp(firebaseConfig);
-    auth = firebase.auth();
-    db = firebase.firestore();
-    // Enable offline persistence in Firestore
-    db.enablePersistence({ synchronizeTabs: true }).catch(err => {
-      console.warn('Firestore persistence notice:', err.code);
-    });
-  }
-} catch (e) {
-  console.warn('Firebase initialization warning:', e);
-}
+let globalConfig = {
+  fedRate: 16.0,
+  filerTaxRate: 20.0,
+  nonFilerTaxRate: 40.0,
+  currency: 'PKR',
+  googleSheetsWebhookUrl: '',
+  registeredUsersMap: {},
+  deletedUserKeys: []
+};
 
 // 2. BANK PRODUCTS CONFIGURATION (DEFAULT SEED & DYNAMIC FIRESTORE RECEPTACLE)
 let BANK_PRODUCTS = [
@@ -51,7 +40,11 @@ let BANK_PRODUCTS = [
     maxTenure: 36,
     tenures: [6, 12, 18, 24, 30, 36],
     feePercent: 1.5,
-    fedRate: 16.0
+    fedRate: 16.0,
+    rateSlabs: [],
+    feeSlabs: [],
+    tenureRates: {},
+    liabilityPricingType: ""
   },
   {
     id: "prod-kmbl-3138",
@@ -65,7 +58,11 @@ let BANK_PRODUCTS = [
     maxTenure: 36,
     tenures: [6, 12, 18, 24, 30, 36],
     feePercent: 1.5,
-    fedRate: 16.0
+    fedRate: 16.0,
+    rateSlabs: [],
+    feeSlabs: [],
+    tenureRates: {},
+    liabilityPricingType: ""
   },
   {
     id: "prod-kmbl-3146",
@@ -79,7 +76,11 @@ let BANK_PRODUCTS = [
     maxTenure: 24,
     tenures: [6, 12, 18, 24],
     feePercent: 1.5,
-    fedRate: 16.0
+    fedRate: 16.0,
+    rateSlabs: [],
+    feeSlabs: [],
+    tenureRates: {},
+    liabilityPricingType: ""
   },
   {
     id: "prod-kmbl-3172",
@@ -93,7 +94,11 @@ let BANK_PRODUCTS = [
     maxTenure: 36,
     tenures: [6, 12, 18, 24, 30, 36],
     feePercent: 1.5,
-    fedRate: 16.0
+    fedRate: 16.0,
+    rateSlabs: [],
+    feeSlabs: [],
+    tenureRates: {},
+    liabilityPricingType: ""
   },
   {
     id: "prod-kmbl-flat-sample",
@@ -107,7 +112,11 @@ let BANK_PRODUCTS = [
     maxTenure: 24,
     tenures: [6, 12, 18, 24],
     feePercent: 1.25,
-    fedRate: 16.0
+    fedRate: 16.0,
+    rateSlabs: [],
+    feeSlabs: [],
+    tenureRates: {},
+    liabilityPricingType: ""
   },
 
   // LIABILITY DEPOSIT PRODUCTS
@@ -123,7 +132,11 @@ let BANK_PRODUCTS = [
     maxTenure: 12,
     tenures: [12],
     feePercent: 0,
-    fedRate: 0
+    fedRate: 0,
+    rateSlabs: [],
+    feeSlabs: [],
+    tenureRates: {},
+    liabilityPricingType: ""
   },
   {
     id: "prod-liab-tdr-3y",
@@ -137,7 +150,11 @@ let BANK_PRODUCTS = [
     maxTenure: 36,
     tenures: [36],
     feePercent: 0,
-    fedRate: 0
+    fedRate: 0,
+    rateSlabs: [],
+    feeSlabs: [],
+    tenureRates: {},
+    liabilityPricingType: ""
   },
   {
     id: "prod-liab-pls-savings",
@@ -151,11 +168,15 @@ let BANK_PRODUCTS = [
     maxTenure: 12,
     tenures: [1, 3, 6, 12],
     feePercent: 0,
-    fedRate: 0
+    fedRate: 0,
+    rateSlabs: [],
+    feeSlabs: [],
+    tenureRates: {},
+    liabilityPricingType: ""
   }
 ];
 
-// 3. RECURSIVE DE-NESTING PAYLOAD SANITIZER (Fixed standard JavaScript Regex)
+// 3. RECURSIVE DE-NESTING PAYLOAD SANITIZER (Standard JavaScript Regex)
 function cleanRawActionPayload(raw) {
   if (!raw || typeof raw !== 'string') return '';
   let text = raw.trim();
@@ -164,12 +185,9 @@ function cleanRawActionPayload(raw) {
   while (text !== prev && iterations < 12) {
     prev = text;
     iterations++;
-    // Strip trailing officer signatures repeatedly: " - By: Officer Name (ID)"
     text = text.replace(/\s*-\s*By\s*:\s*[^\-\[\]]+(?:\([^\)]*\))?\s*$/gi, '').trim();
     text = text.replace(/\s*-\s*By\s*:.*$/gi, '').trim();
-    // Strip leading bullet points and timestamp brackets: e.g. "[2026-11-09 04:01 PM] "
     text = text.replace(/^•?\s*\[[^\]]*\]\s*/g, '').trim();
-    // Strip leading action tags and emoji headers
     text = text.replace(/^(STATUS_CHANGE|STATUS|FOLLOW_UP|FOLLOWUP|CALL|PHONE|WHATSAPP|SMS|CREATED|PROPOSAL_UPDATE|PROPOSAL|NOTE_UPDATE|NOTE):\s*/gi, '').trim();
     text = text.replace(/^[🔄📅⏰📞💬✉️🎯📋📝✏️•\s]+/g, '').trim();
     text = text.replace(/^(Note Added|Status Changed|Follow-Up Date|Follow-Up Scheduled|Phone Call|Direct Phone Call|WhatsApp|WhatsApp Quotation|SMS|SMS Quotation|Lead Created|Loan Lead Created|Deposit Lead Created|Proposal Saved|Note \/ Comment Updated|Initial Customer Note):\s*/gi, '').trim();
@@ -220,6 +238,17 @@ class LocalDB {
     });
   }
 
+  static async deleteLead(leadId) {
+    const d = await this.init();
+    return new Promise((resolve) => {
+      const tx = d.transaction('leads', 'readwrite');
+      const store = tx.objectStore('leads');
+      store.delete(leadId);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+    });
+  }
+
   static async getSetting(key, fallback = '') {
     const d = await this.init();
     return new Promise((resolve) => {
@@ -265,8 +294,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   await renderLeads();
   updateOnlineStatus();
 
-  // Setup Firebase Auth & Real-Time Listeners
-  initFirebaseAuthAndFirestore();
+  if (window.FirebaseBridge) {
+    initFirebaseAuthAndFirestore();
+  }
 
   // Register online/offline listeners
   window.addEventListener('online', () => {
@@ -283,14 +313,25 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
+// Wait for ES Module Firebase Bridge if it finishes slightly after DOMContentLoaded
+window.addEventListener('firebase-bridge-ready', () => {
+  initFirebaseAuthAndFirestore();
+});
+
 // 6. FIREBASE AUTH & ACCESS CONTROL GATE (ALLOW / DENY)
 function initFirebaseAuthAndFirestore() {
-  if (!auth) {
-    console.warn('Firebase Auth is not available.');
-    return;
-  }
+  if (firebaseInitialized || !window.FirebaseBridge) return;
+  fb = window.FirebaseBridge;
+  firebaseInitialized = true;
 
-  auth.onAuthStateChanged(async (user) => {
+  // Handle redirect return if user signed in via redirect (e.g. iOS standalone PWA or popup blocked)
+  fb.getRedirectResult().catch((err) => {
+    if (err && err.code) {
+      handleAuthError(err);
+    }
+  });
+
+  fb.onAuthStateChanged(async (user) => {
     currentUser = user;
     const authBtn = document.getElementById('googleSignInBtn');
     const chip = document.getElementById('userProfileChip');
@@ -302,24 +343,26 @@ function initFirebaseAuthAndFirestore() {
     const settingsRole = document.getElementById('settingsUserRole');
 
     if (user) {
-      // User is signed in
       authBtn.style.display = 'none';
       chip.style.display = 'inline-flex';
-      nameSpan.textContent = user.displayName || user.email.split('@')[0];
+      nameSpan.textContent = user.displayName || (user.email ? user.email.split('@')[0] : 'Officer');
       if (user.photoURL) {
         avatarImg.src = user.photoURL;
       }
       settingsEmail.textContent = user.email || 'Google User';
       settingsAuthBtn.textContent = '🚪 Sign Out';
 
-      // Verify Access in Firestore users/{uid} and config/global
+      // Start Global Config & Access Control Listeners
+      startFirestoreGlobalConfigListener(user);
+      startFirestoreUserListener(user);
+
+      // Verify Access immediately
       await verifyUserAccessAndSyncProfile(user);
 
-      // Start Real-Time Listeners
+      // Start Real-Time Product & Lead Listeners
       startFirestoreProductsListener();
       startFirestoreLeadsListener();
     } else {
-      // User is signed out
       authBtn.style.display = 'inline-flex';
       chip.style.display = 'none';
       settingsEmail.textContent = 'Not signed in';
@@ -328,47 +371,120 @@ function initFirebaseAuthAndFirestore() {
       settingsStatus.style.color = '#F59E0B';
       settingsRole.textContent = 'Loan Officer';
 
-      // Hide Access Denied screen if displayed
-      document.getElementById('accessDeniedScreen').classList.remove('active');
+      hideAccessDeniedScreen();
 
-      // Stop Firestore listeners
-      if (unsubscribeProducts) unsubscribeProducts();
-      if (unsubscribeLeads) unsubscribeLeads();
+      if (unsubscribeProducts) { unsubscribeProducts(); unsubscribeProducts = null; }
+      if (unsubscribeLeads) { unsubscribeLeads(); unsubscribeLeads = null; }
+      if (unsubscribeGlobalConfig) { unsubscribeGlobalConfig(); unsubscribeGlobalConfig = null; }
+      if (unsubscribeUserDoc) { unsubscribeUserDoc(); unsubscribeUserDoc = null; }
     }
   });
 }
 
-// Check Allow / Deny Whitelist
+function startFirestoreGlobalConfigListener(user) {
+  if (!fb) return;
+  if (unsubscribeGlobalConfig) unsubscribeGlobalConfig();
+
+  unsubscribeGlobalConfig = fb.onDocSnapshot('config', 'global', async (docSnap) => {
+    if (docSnap.exists()) {
+      const d = docSnap.data();
+      globalConfig.fedRate = Number(d.fedRate) || 16.0;
+      globalConfig.filerTaxRate = Number(d.filerTaxRate) || 20.0;
+      globalConfig.nonFilerTaxRate = Number(d.nonFilerTaxRate) || 40.0;
+      globalConfig.currency = d.currency || 'PKR';
+      globalConfig.registeredUsersMap = d.registeredUsersMap || {};
+      globalConfig.deletedUserKeys = Array.isArray(d.deletedUserKeys) ? d.deletedUserKeys : [];
+
+      if (d.googleSheetsWebhookUrl && !officerProfile.webhookUrl) {
+        officerProfile.webhookUrl = d.googleSheetsWebhookUrl;
+        await LocalDB.setSetting('webhookUrl', officerProfile.webhookUrl);
+        const webhookInput = document.getElementById('settingsWebhookUrl');
+        if (webhookInput) webhookInput.value = officerProfile.webhookUrl;
+      }
+
+      const filerLabel = document.getElementById('filerToggleLabel');
+      if (filerLabel) {
+        filerLabel.textContent = `Active Tax Filer (${globalConfig.filerTaxRate}% Tax vs ${globalConfig.nonFilerTaxRate}% Non-Filer)`;
+      }
+      calculate();
+
+      // Re-evaluate Allow/Deny whenever global registeredUsersMap updates from Android Admin panel
+      if (user) {
+        await verifyUserAccessAndSyncProfile(user);
+      }
+    }
+  }, (err) => {
+    console.warn('Global config listener notice:', err);
+  });
+}
+
+function startFirestoreUserListener(user) {
+  if (!fb) return;
+  if (unsubscribeUserDoc) unsubscribeUserDoc();
+
+  unsubscribeUserDoc = fb.onDocSnapshot('users', user.uid, async () => {
+    await verifyUserAccessAndSyncProfile(user);
+  }, (err) => {
+    console.warn('User doc listener notice:', err);
+  });
+}
+
+// Check Allow / Deny Whitelist (Matches Android FirestoreRepository.kt)
 async function verifyUserAccessAndSyncProfile(user) {
-  if (!db) return;
+  if (!fb) return;
 
   try {
-    const userDocRef = db.collection('users').document(user.uid);
-    const snap = await userDocRef.get();
+    const isPrimaryAdmin = Boolean(
+      user.email && (user.email.toLowerCase().includes('vipanjum') || user.email.toLowerCase().includes('admin'))
+    );
 
-    const isPrimaryAdmin = user.email && (user.email.toLowerCase().includes('vipanjum') || user.email.toLowerCase().includes('admin'));
+    // 1. Check /users/{uid}
+    const snap = await fb.getDoc('users', user.uid);
+    let userRecord = snap.exists() ? snap.data() : null;
 
-    if (snap.exists) {
-      const data = snap.data();
-      currentUserProfile = { uid: user.uid, ...data };
+    // 2. Also check /config/global -> registeredUsersMap (Android admin toggles write here too!)
+    let globalRecord = null;
+    try {
+      const globalSnap = await fb.getDoc('config', 'global');
+      if (globalSnap.exists()) {
+        const gData = globalSnap.data();
+        const regMap = gData.registeredUsersMap || {};
+        globalConfig.registeredUsersMap = regMap;
+        globalRecord = regMap[user.uid] || Object.values(regMap).find(u =>
+          u && user.email && u.email && u.email.toLowerCase() === user.email.toLowerCase()
+        ) || null;
+      }
+    } catch (e) {
+      console.warn('Global registry read notice:', e);
+    }
 
-      // Check Allow / Deny status (Android uses isBlocked: true = Blocked, isBlocked: false = Allowed)
-      if (data.isBlocked === true && !isPrimaryAdmin) {
+    // Pick freshest record between /users/{uid} and /config/global.registeredUsersMap
+    let effectiveRecord = userRecord;
+    if (globalRecord && (!effectiveRecord || (Number(globalRecord.updatedAt) || 0) >= (Number(effectiveRecord.updatedAt) || 0))) {
+      effectiveRecord = globalRecord;
+    }
+
+    if (effectiveRecord) {
+      currentUserProfile = { uid: user.uid, ...effectiveRecord };
+
+      if (effectiveRecord.isBlocked === true && !isPrimaryAdmin) {
         showAccessDeniedScreen(user);
         return;
       } else {
         hideAccessDeniedScreen();
       }
 
-      // Update officer profile if fields are present
-      if (data.officerName) officerProfile.officerName = data.officerName;
-      if (data.staffId) officerProfile.staffId = data.staffId;
-      if (data.branchName) officerProfile.branchName = data.branchName;
-      if (data.role) document.getElementById('settingsUserRole').textContent = data.role;
+      if (effectiveRecord.officerName) officerProfile.officerName = effectiveRecord.officerName;
+      if (effectiveRecord.staffId) officerProfile.staffId = effectiveRecord.staffId;
+      if (effectiveRecord.branchName) officerProfile.branchName = effectiveRecord.branchName;
+      if (effectiveRecord.role) {
+        document.getElementById('settingsUserRole').textContent = effectiveRecord.role;
+      }
     } else {
-      // Brand new user registration in Firestore
+      // Brand new user: Admin is always allowed; new officers default to blocked (isBlocked: true)
+      // until Admin enables them in Firestore / Android Admin Panel (exact Android parity)
       const defaultRole = isPrimaryAdmin ? 'Admin' : 'Loan Officer';
-      const defaultBlocked = isPrimaryAdmin ? false : false; // Default active for seamless officer onboarding
+      const defaultBlocked = !isPrimaryAdmin;
 
       const newUser = {
         uid: user.uid,
@@ -377,13 +493,19 @@ async function verifyUserAccessAndSyncProfile(user) {
         staffId: officerProfile.staffId || ('RO-' + user.uid.substring(0, 4).toUpperCase()),
         branchName: officerProfile.branchName || 'Main Branch',
         allowedSupervisorBranch: officerProfile.branchName || 'Main Branch',
-        canUseSupervisorFilter: isPrimaryAdmin ? true : false,
+        canUseSupervisorFilter: isPrimaryAdmin,
         isBlocked: defaultBlocked,
         role: defaultRole,
         updatedAt: Date.now()
       };
 
-      await userDocRef.set(newUser, { merge: true });
+      await fb.setDoc('users', user.uid, newUser, true);
+      try {
+        await fb.setDoc('config', 'global', {
+          registeredUsersMap: { [user.uid]: newUser }
+        }, true);
+      } catch (e) {}
+
       currentUserProfile = newUser;
 
       if (defaultBlocked) {
@@ -394,7 +516,7 @@ async function verifyUserAccessAndSyncProfile(user) {
       }
     }
 
-    // Refresh UI badges
+    // Refresh UI badges & settings inputs
     document.getElementById('officerBadge').textContent = `👤 Officer: ${officerProfile.officerName} (${officerProfile.staffId})`;
     document.getElementById('branchBadge').textContent = `🏢 ${officerProfile.branchName}`;
     document.getElementById('settingsOfficerName').value = officerProfile.officerName;
@@ -404,7 +526,6 @@ async function verifyUserAccessAndSyncProfile(user) {
     document.getElementById('settingsAccessStatus').textContent = 'Authorized (Active)';
     document.getElementById('settingsAccessStatus').style.color = '#16A34A';
 
-    // Populate branch filter dropdown
     updateBranchFilterOptions();
   } catch (err) {
     console.warn('Error verifying user access in Firestore:', err);
@@ -429,28 +550,64 @@ async function checkUserAccessAgain() {
   }
 }
 
-// Sign-In & Sign-Out Handlers
-async function signInWithGoogle() {
-  if (!auth) {
-    alert('Firebase Auth is initializing or offline.');
+function handleAuthError(err) {
+  if (!err || err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
     return;
   }
+  if (err.code === 'auth/unauthorized-domain') {
+    const host = window.location.hostname || 'github.io';
+    const hostEl = document.getElementById('unauthorizedHostText');
+    if (hostEl) hostEl.textContent = host;
+    openModal('unauthorizedDomainModal');
+    return;
+  }
+  alert('Google Sign-In notice: ' + (err.message || err.code));
+}
+
+function copyUnauthorizedHost() {
+  const host = document.getElementById('unauthorizedHostText').textContent;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(host).then(() => {
+      alert(`✅ Copied "${host}"! Now paste it in Firebase Console ➔ Authentication ➔ Settings ➔ Authorized domains.`);
+    }).catch(() => {
+      alert(`Domain to add: ${host}`);
+    });
+  } else {
+    alert(`Domain to add: ${host}`);
+  }
+}
+
+// Sign-In & Sign-Out Handlers
+async function signInWithGoogle() {
+  if (!fb) {
+    alert('Firebase Auth is still initializing or the device is offline. Please wait a second and try again.');
+    return;
+  }
+  const isStandalonePWA = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
   try {
-    const provider = new firebase.auth.GoogleAuthProvider();
-    provider.addScope('profile');
-    provider.addScope('email');
-    await auth.signInWithPopup(provider);
+    if (isStandalonePWA) {
+      // Standalone iOS / Android PWA works more reliably with redirect
+      await fb.signInWithGoogleRedirect();
+    } else {
+      await fb.signInWithGooglePopup();
+    }
   } catch (err) {
-    if (err.code !== 'auth/popup-closed-by-user') {
-      alert('Google Sign-In notice: ' + err.message);
+    if (err && (err.code === 'auth/popup-blocked' || err.code === 'auth/operation-not-supported-in-this-environment')) {
+      try {
+        await fb.signInWithGoogleRedirect();
+      } catch (redirErr) {
+        handleAuthError(redirErr);
+      }
+    } else {
+      handleAuthError(err);
     }
   }
 }
 
 async function signOutUser() {
-  if (!auth) return;
+  if (!fb) return;
   try {
-    await auth.signOut();
+    await fb.signOut();
     hideAccessDeniedScreen();
     alert('Logged out successfully.');
   } catch (err) {
@@ -468,35 +625,40 @@ function toggleAuthAction() {
 
 // 7. REAL-TIME FIRESTORE PRODUCTS SYNCHRONIZATION
 function startFirestoreProductsListener() {
-  if (!db) return;
+  if (!fb) return;
   if (unsubscribeProducts) unsubscribeProducts();
 
-  unsubscribeProducts = db.collection('products').onSnapshot((snapshot) => {
+  unsubscribeProducts = fb.onCollectionSnapshot('products', (snapshot) => {
     if (!snapshot.empty) {
       const fetched = [];
-      snapshot.forEach(doc => {
-        const d = doc.data();
-        const pId = doc.id;
+      snapshot.forEach(docSnap => {
+        const d = docSnap.data();
+        const pId = d.id || docSnap.id;
         const category = d.category || 'asset';
         const rateType = d.rateType || 'reducing';
-        const defaultAnnualRate = Number(d.defaultAnnualRate) || 20.0;
+        const defaultAnnualRate = Number(d.defaultAnnualRate) || 0.0;
         const minAmount = Number(d.minAmount) || 50000;
         const maxAmount = Number(d.maxAmount) || 5000000;
-        const minTenure = Number(d.minTenure) || 3;
+        const minTenure = Number(d.minTenure) || 1;
         const maxTenure = Number(d.maxTenure) || 36;
         const feePercent = Number(d.defaultFeeValue) || 1.5;
-        const fedRate = Number(d.fedRate) || 16.0;
+        const fedRate = Number(d.fedRate) || globalConfig.fedRate || 16.0;
+        const rateSlabs = Array.isArray(d.rateSlabs) ? d.rateSlabs : [];
+        const feeSlabs = Array.isArray(d.feeSlabs) ? d.feeSlabs : [];
+        const tenureRates = (d.tenureRates && typeof d.tenureRates === 'object') ? d.tenureRates : {};
+        const liabilityPricingType = d.liabilityPricingType || '';
 
-        // Extract fixed tenures array or build default range
         let tenures = [];
         if (Array.isArray(d.fixedTenures) && d.fixedTenures.length > 0) {
-          tenures = d.fixedTenures.map(n => Number(n)).sort((a,b) => a - b);
+          tenures = d.fixedTenures.map(n => Number(n)).sort((a, b) => a - b);
+        } else if (Object.keys(tenureRates).length > 0) {
+          tenures = Object.keys(tenureRates).map(k => Number(k)).filter(n => !isNaN(n) && n > 0).sort((a, b) => a - b);
         } else {
-          // Generate typical bank tenure options
-          for (let t = minTenure; t <= maxTenure; t += 6) {
+          for (let t = Math.max(6, minTenure); t <= maxTenure; t += 6) {
             if (t > 0) tenures.push(t);
           }
-          if (!tenures.includes(maxTenure)) tenures.push(maxTenure);
+          if (minTenure > 0 && !tenures.includes(minTenure)) tenures.unshift(minTenure);
+          if (maxTenure > 0 && !tenures.includes(maxTenure)) tenures.push(maxTenure);
         }
 
         fetched.push({
@@ -511,16 +673,22 @@ function startFirestoreProductsListener() {
           maxTenure,
           tenures: tenures.length > 0 ? tenures : [6, 12, 18, 24, 36],
           feePercent,
-          fedRate
+          fedRate,
+          rateSlabs,
+          feeSlabs,
+          tenureRates,
+          liabilityPricingType
         });
       });
 
       if (fetched.length > 0) {
         BANK_PRODUCTS = fetched;
-        populateProducts();
+        const previousId = currentProduct ? currentProduct.id : null;
+        populateProducts(previousId);
         calculate();
         renderProductsManagementList();
-        document.getElementById('firestoreProductSyncBadge').textContent = `⚡ Firestore Synced (${fetched.length} Products)`;
+        const badge = document.getElementById('firestoreProductSyncBadge');
+        if (badge) badge.textContent = `⚡ Firestore Synced (${fetched.length} Products)`;
       }
     }
   }, (err) => {
@@ -530,52 +698,58 @@ function startFirestoreProductsListener() {
 
 // 8. REAL-TIME FIRESTORE LEADS SYNCHRONIZATION (WITH BRANCH FILTERING)
 function startFirestoreLeadsListener() {
-  if (!db) return;
+  if (!fb) return;
   if (unsubscribeLeads) unsubscribeLeads();
 
-  unsubscribeLeads = db.collection('leads').onSnapshot(async (snapshot) => {
-    if (!snapshot.empty) {
-      const localLeads = await LocalDB.getAllLeads();
-      const localMap = new Map(localLeads.map(l => [l.id, l]));
+  unsubscribeLeads = fb.onCollectionSnapshot('leads', async (snapshot) => {
+    const localLeads = await LocalDB.getAllLeads();
+    const localMap = new Map(localLeads.map(l => [l.id, l]));
+    const remoteIds = new Set();
 
-      snapshot.forEach(doc => {
-        const d = doc.data();
-        const leadId = doc.id;
-        const existing = localMap.get(leadId);
+    snapshot.forEach(docSnap => {
+      const d = docSnap.data();
+      const leadId = d.id || docSnap.id;
+      remoteIds.add(leadId);
+      const existing = localMap.get(leadId);
 
-        // Merge logic: ensure latest activities & notes are retained
-        const remoteLead = {
-          id: leadId,
-          customerName: d.customerName || 'Customer',
-          mobile: d.mobile || '',
-          category: d.category || 'asset',
-          productId: d.productId || '',
-          productName: d.productName || 'Bank Facility',
-          loanAmount: Number(d.loanAmount) || 0,
-          tenureMonths: Number(d.tenureMonths) || 12,
-          monthlyEmi: Number(d.monthlyEmi) || 0,
-          totalProfit: Number(d.totalProfit) || 0,
-          processingFee: Number(d.processingFee) || 0,
-          status: d.status || 'New',
-          notes: cleanRawActionPayload(d.notes || ''),
-          followUpDate: d.followUpDate || '',
-          officerName: d.officerName || '',
-          officerId: d.officerId || '',
-          branchName: d.branchName || 'Main Branch',
-          userId: d.userId || '',
-          createdAt: Number(d.createdAt) || Date.now(),
-          syncStatus: 'synced',
-          approachCount: Number(d.approachCount) || (d.activities ? d.activities.length : 1),
-          activities: Array.isArray(d.activities) ? d.activities : (existing ? existing.activities : [])
-        };
+      const remoteLead = {
+        id: leadId,
+        customerName: d.customerName || 'Customer',
+        mobile: d.mobile || '',
+        category: d.category || 'asset',
+        productId: d.productId || '',
+        productName: d.productName || 'Bank Facility',
+        loanAmount: Number(d.loanAmount) || 0,
+        tenureMonths: Number(d.tenureMonths) || 12,
+        monthlyEmi: Number(d.monthlyEmi) || 0,
+        totalProfit: Number(d.totalProfit) || 0,
+        processingFee: Number(d.processingFee) || 0,
+        status: d.status || 'New',
+        notes: cleanRawActionPayload(d.notes || ''),
+        followUpDate: d.followUpDate || '',
+        officerName: d.officerName || '',
+        officerId: d.officerId || '',
+        branchName: d.branchName || 'Main Branch',
+        userId: d.userId || '',
+        createdAt: Number(d.createdAt) || Date.now(),
+        syncStatus: 'synced',
+        approachCount: Number(d.approachCount) || (Array.isArray(d.activities) ? d.activities.length : 1),
+        activities: Array.isArray(d.activities) ? d.activities : (existing ? existing.activities : [])
+      };
 
-        LocalDB.saveLead(remoteLead);
-        localMap.set(leadId, remoteLead);
-      });
+      LocalDB.saveLead(remoteLead);
+      localMap.set(leadId, remoteLead);
+    });
 
-      await renderLeads();
-      updateBranchFilterOptions();
+    // If a previously synced lead was deleted on Android/another client, remove it locally too
+    for (const local of localLeads) {
+      if (local.syncStatus === 'synced' && !remoteIds.has(local.id)) {
+        await LocalDB.deleteLead(local.id);
+      }
     }
+
+    await renderLeads();
+    updateBranchFilterOptions();
   }, (err) => {
     console.warn('Leads sync stream notice:', err);
   });
@@ -590,10 +764,8 @@ async function updateBranchFilterOptions() {
   const leads = await LocalDB.getAllLeads();
   const branches = new Set();
 
-  // Add user's assigned branch
   if (officerProfile.branchName) branches.add(officerProfile.branchName);
 
-  // Add branches from all leads
   leads.forEach(l => {
     if (l.branchName && l.branchName.trim()) {
       branches.add(l.branchName.trim());
@@ -610,11 +782,9 @@ async function updateBranchFilterOptions() {
     branchSelect.appendChild(opt);
   });
 
-  // Default selection: User's assigned branch
   if (currentSelection && currentSelection !== 'All' && branchArray.includes(currentSelection)) {
     branchSelect.value = currentSelection;
   } else if (officerProfile.branchName && branchArray.includes(officerProfile.branchName)) {
-    // If not Admin, default to their branch
     const isSupervisor = currentUserProfile && (currentUserProfile.role === 'Admin' || currentUserProfile.canUseSupervisorFilter);
     if (!isSupervisor) {
       branchSelect.value = officerProfile.branchName;
@@ -678,8 +848,8 @@ async function confirmSaveProduct() {
   const name = document.getElementById('prodEditName').value.trim();
   const category = document.getElementById('prodEditCategory').value;
   const rateType = document.getElementById('prodEditRateType').value;
-  const rate = parseFloat(document.getElementById('prodEditRate').value) || 20.0;
-  const fee = parseFloat(document.getElementById('prodEditFee').value) || 1.5;
+  const rate = parseFloat(document.getElementById('prodEditRate').value) || 0.0;
+  const fee = parseFloat(document.getElementById('prodEditFee').value) || 0.0;
   const minAmount = parseInt(document.getElementById('prodEditMinAmount').value, 10) || 50000;
   const maxAmount = parseInt(document.getElementById('prodEditMaxAmount').value, 10) || 1000000;
   const minTenure = parseInt(document.getElementById('prodEditMinTenure').value, 10) || 3;
@@ -690,7 +860,6 @@ async function confirmSaveProduct() {
     return;
   }
 
-  // Update in local memory
   let prod = BANK_PRODUCTS.find(p => p.id === pId);
   if (prod) {
     prod.name = name;
@@ -715,35 +884,38 @@ async function confirmSaveProduct() {
       minTenure,
       maxTenure,
       tenures: [6, 12, 18, 24, 36],
-      fedRate: 16.0
+      fedRate: globalConfig.fedRate || 16.0,
+      rateSlabs: [],
+      feeSlabs: [],
+      tenureRates: {},
+      liabilityPricingType: ''
     };
     BANK_PRODUCTS.push(prod);
   }
 
-  // Write to Firestore products collection for instant Android & Web parity
-  if (db) {
+  if (fb) {
     try {
-      await db.collection('products').document(pId).set({
+      await fb.setDoc('products', pId, {
         id: pId,
         name,
         category,
         rateType,
         defaultAnnualRate: rate,
         defaultFeeValue: fee,
-        fedRate: 16.0,
+        fedRate: globalConfig.fedRate || 16.0,
         minAmount,
         maxAmount,
         minTenure,
         maxTenure,
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
+        updatedAt: fb.serverTimestamp()
+      }, true);
     } catch (e) {
       console.warn('Error saving product to Firestore:', e);
     }
   }
 
   closeModal('editProductModal');
-  populateProducts();
+  populateProducts(pId);
   calculate();
   renderProductsManagementList();
   alert('✅ Product saved and synced to Firestore!');
@@ -762,7 +934,6 @@ function updateOnlineStatus() {
   }
 }
 
-// Tab Switching
 function switchTab(tabId, el) {
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -805,7 +976,7 @@ function setCategory(cat) {
   calculate();
 }
 
-function populateProducts() {
+function populateProducts(preserveId = null) {
   const select = document.getElementById('productSelect');
   select.innerHTML = '';
   const filtered = BANK_PRODUCTS.filter(p => p.category === currentCategory);
@@ -815,12 +986,15 @@ function populateProducts() {
     opt.textContent = `${p.name} (${p.defaultAnnualRate}%)`;
     select.appendChild(opt);
   });
-  currentProduct = filtered[0] || BANK_PRODUCTS[0];
+  const preserved = preserveId ? filtered.find(p => p.id === preserveId) : null;
+  currentProduct = preserved || filtered[0] || BANK_PRODUCTS[0];
+  if (currentProduct) select.value = currentProduct.id;
   populateTenures();
 }
 
 function populateTenures() {
   const tenureSelect = document.getElementById('tenureMonths');
+  const prevTenure = parseInt(tenureSelect.value, 10);
   tenureSelect.innerHTML = '';
   if (!currentProduct || !currentProduct.tenures) return;
   currentProduct.tenures.forEach(m => {
@@ -829,6 +1003,9 @@ function populateTenures() {
     opt.textContent = `${m} Months`;
     tenureSelect.appendChild(opt);
   });
+  if (prevTenure && currentProduct.tenures.includes(prevTenure)) {
+    tenureSelect.value = prevTenure;
+  }
 }
 
 function onProductChange() {
@@ -838,8 +1015,100 @@ function onProductChange() {
   calculate();
 }
 
-// 11. CALCULATOR ENGINE
+// 11. CALCULATOR ENGINE (Exact Android LoanCalculators.kt Parity)
 let lastCalculation = null;
+
+function getApplicableRate(product, amount, tenureMonths) {
+  const hasPositiveSlab = Array.isArray(product.rateSlabs) && product.rateSlabs.some(s => Number(s.annualRate) > 0);
+  const hasPositiveTenure = product.tenureRates && Object.values(product.tenureRates).some(r => Number(r) > 0);
+  if (product.defaultAnnualRate <= 0 && !hasPositiveSlab && !hasPositiveTenure) {
+    return 0.0;
+  }
+
+  // Helper to match amount slab
+  const findAmountSlabRate = (slabs) => {
+    if (!Array.isArray(slabs) || slabs.length === 0) return null;
+    if (amount > 0) {
+      const exact = slabs.find(s => amount >= Number(s.minAmount) && amount <= Number(s.maxAmount));
+      if (exact) return Number(exact.annualRate);
+      let nearest = slabs[0];
+      let minDist = Infinity;
+      slabs.forEach(s => {
+        const minA = Number(s.minAmount);
+        const maxA = Number(s.maxAmount);
+        const dist = amount < minA ? (minA - amount) : (amount > maxA ? (amount - maxA) : 0);
+        if (dist < minDist) { minDist = dist; nearest = s; }
+      });
+      if (nearest) return Number(nearest.annualRate);
+    }
+    return Number(slabs[0].annualRate);
+  };
+
+  if (product.category === 'liability') {
+    const isAmountTierBased = product.liabilityPricingType === 'amount' ||
+      ((!product.tenureRates || Object.keys(product.tenureRates).length === 0) && Array.isArray(product.rateSlabs) && product.rateSlabs.length > 1);
+    if (isAmountTierBased && product.rateSlabs && product.rateSlabs.length > 0) {
+      const slabRate = findAmountSlabRate(product.rateSlabs);
+      if (slabRate !== null) return slabRate;
+    }
+
+    if (product.tenureRates && Object.keys(product.tenureRates).length > 0) {
+      const keys = Object.keys(product.tenureRates).map(Number).filter(n => !isNaN(n));
+      if (tenureMonths > 0 && keys.length > 0) {
+        if (product.tenureRates[tenureMonths] !== undefined) {
+          return Number(product.tenureRates[tenureMonths]);
+        }
+        let nearestK = keys[0];
+        let minDiff = Math.abs(nearestK - tenureMonths);
+        keys.forEach(k => {
+          const diff = Math.abs(k - tenureMonths);
+          if (diff < minDiff) { minDiff = diff; nearestK = k; }
+        });
+        return Number(product.tenureRates[nearestK]);
+      } else if (keys.length > 0) {
+        return Number(product.tenureRates[keys[0]]);
+      }
+    }
+  }
+
+  if (Array.isArray(product.rateSlabs) && product.rateSlabs.length > 0) {
+    const slabRate = findAmountSlabRate(product.rateSlabs);
+    if (slabRate !== null) return slabRate;
+  }
+
+  return Number(product.defaultAnnualRate) || 0;
+}
+
+function calculateProcessingFee(product, principal, fedRate) {
+  if (principal <= 0) return { baseFee: 0, fedAmount: 0, totalFee: 0 };
+
+  let fee = 0;
+  if (Array.isArray(product.feeSlabs) && product.feeSlabs.length > 0) {
+    let slab = product.feeSlabs.find(s => principal >= Number(s.minAmount) && principal <= Number(s.maxAmount));
+    if (!slab) {
+      let minDist = Infinity;
+      product.feeSlabs.forEach(s => {
+        const minA = Number(s.minAmount);
+        const maxA = Number(s.maxAmount);
+        const dist = principal < minA ? (minA - principal) : (principal > maxA ? (principal - maxA) : 0);
+        if (dist < minDist) { minDist = dist; slab = s; }
+      });
+    }
+    if (slab) {
+      const raw = (String(slab.feeType).toLowerCase() === 'fixed')
+        ? Math.round(Number(slab.feeValue) || 0)
+        : Math.round((principal * (Number(slab.feeValue) || 0)) / 100.0);
+      const minApplied = Math.max(Number(slab.minFee) || 0, raw);
+      const maxFee = Number(slab.maxFee) || 0;
+      fee = maxFee > 0 ? Math.min(minApplied, maxFee) : minApplied;
+    }
+  } else if (product.feePercent > 0) {
+    fee = Math.round(principal * (product.feePercent / 100.0));
+  }
+
+  const fedAmount = Math.round((fee * fedRate) / 100.0);
+  return { baseFee: fee, fedAmount, totalFee: fee + fedAmount };
+}
 
 function calculate() {
   if (!currentProduct) return;
@@ -849,21 +1118,19 @@ function calculate() {
   const allowedDbr = parseFloat(document.getElementById('allowedDbr').value) || 50;
   const isFiler = document.getElementById('isFilerToggle').checked;
 
-  const rate = currentProduct.defaultAnnualRate;
-  document.getElementById('resRate').textContent = `${rate.toFixed(1)}%`;
+  const rate = getApplicableRate(currentProduct, amount, tenure);
+  document.getElementById('resRate').textContent = `${rate.toFixed(2).replace(/\.00$/, '.0')}%`;
 
   if (currentProduct.category === 'asset') {
-    // ASSET LOAN CALCULATION
     let emi = 0;
     let totalProfit = 0;
     let totalPayable = 0;
 
-    if (currentProduct.rateType === 'flat') {
+    if (String(currentProduct.rateType).toLowerCase() === 'flat') {
       totalProfit = Math.round(amount * (rate / 100.0) * (tenure / 12.0));
       totalPayable = amount + totalProfit;
       emi = Math.round(totalPayable / tenure);
     } else {
-      // Reducing rate calculation
       const monthlyRate = (rate / 100.0) / 12.0;
       if (monthlyRate === 0) {
         emi = Math.round(amount / tenure);
@@ -876,20 +1143,18 @@ function calculate() {
       }
     }
 
-    // Processing Fee (Tiered: e.g. 1.5% + 16% FED)
-    const baseFee = Math.round(amount * ((currentProduct.feePercent || 1.5) / 100.0));
-    const fedFee = Math.round(baseFee * ((currentProduct.fedRate || 16.0) / 100.0));
-    const totalFee = baseFee + fedFee;
-
-    // DBR Calculation
+    const effectiveFed = currentProduct.fedRate || globalConfig.fedRate || 16.0;
+    const feeRes = calculateProcessingFee(currentProduct, amount, effectiveFed);
+    const totalFee = feeRes.totalFee;
     const dbrRatio = monthlyIncome > 0 ? ((emi / monthlyIncome) * 100).toFixed(1) : '0';
 
-    // Update DOM
     document.getElementById('emiRow').style.display = 'flex';
     document.getElementById('dbrRow').style.display = 'flex';
     document.getElementById('feeRow').style.display = 'flex';
     document.getElementById('profitRow').style.display = 'flex';
     document.getElementById('rateLabel').textContent = 'Applied Profit Rate:';
+    document.getElementById('emiRow').children[0].textContent = 'Monthly Installment (EMI):';
+    document.getElementById('feeRow').children[0].textContent = `Processing Fee (inc. ${effectiveFed}% FED):`;
     document.getElementById('profitLabel').textContent = 'Total Profit / Markup:';
     document.getElementById('totalPayableLabel').textContent = 'Total Repayable Amount:';
 
@@ -911,13 +1176,13 @@ function calculate() {
       dbrRatio: parseFloat(dbrRatio)
     };
   } else {
-    // LIABILITY DEPOSIT CALCULATION
-    const taxRate = isFiler ? 15.0 : 40.0;
+    const taxRate = isFiler ? (globalConfig.filerTaxRate || 20.0) : (globalConfig.nonFilerTaxRate || 40.0);
     const grossTotalProfit = Math.round(amount * (rate / 100.0) * (tenure / 12.0));
     const grossMonthlyProfit = Math.round((amount * (rate / 100.0)) / 12.0);
     const totalTax = Math.round(grossTotalProfit * (taxRate / 100.0));
-    const netTotalProfit = grossTotalProfit - totalTax;
-    const netMonthlyProfit = Math.round(grossMonthlyProfit * (1.0 - (taxRate / 100.0)));
+    const monthlyTax = Math.round(grossMonthlyProfit * (taxRate / 100.0));
+    const netTotalProfit = Math.max(0, grossTotalProfit - totalTax);
+    const netMonthlyProfit = Math.max(0, grossMonthlyProfit - monthlyTax);
     const netMaturity = amount + netTotalProfit;
 
     document.getElementById('emiRow').style.display = 'flex';
@@ -1004,7 +1269,6 @@ async function saveLeadFromCalculator() {
   const cleanNote = cleanRawActionPayload(notes);
 
   if (lead) {
-    // Update existing lead in-place
     lead.customerName = custName;
     lead.loanAmount = lastCalculation.amount;
     lead.tenureMonths = lastCalculation.tenure;
@@ -1038,7 +1302,6 @@ async function saveLeadFromCalculator() {
       officerId: officerProfile.staffId
     });
   } else {
-    // Create new lead
     const id = 'kb-lead-' + now + '-' + Math.random().toString(36).substring(2, 7);
     const initialActivities = [];
     if (cleanNote) {
@@ -1090,14 +1353,14 @@ async function saveLeadFromCalculator() {
 
   await LocalDB.saveLead(lead);
 
-  // Sync to Firestore leads collection in real-time
-  if (db) {
+  if (fb) {
     try {
-      await db.collection('leads').document(lead.id).set({
+      await fb.setDoc('leads', lead.id, {
         ...lead,
         syncStatus: 'synced',
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
+        updatedAtMs: Date.now(),
+        updatedAt: fb.serverTimestamp()
+      }, true);
       lead.syncStatus = 'synced';
       await LocalDB.saveLead(lead);
     } catch (e) {
@@ -1107,7 +1370,6 @@ async function saveLeadFromCalculator() {
 
   alert(`✅ Lead for ${custName} saved successfully and synced!`);
 
-  // Clear inputs
   document.getElementById('customerName').value = '';
   document.getElementById('customerMobile').value = '';
   document.getElementById('leadNotes').value = '';
@@ -1115,13 +1377,12 @@ async function saveLeadFromCalculator() {
   await renderLeads();
   updateBranchFilterOptions();
 
-  // Background sync to Google Sheet webhook
   if (navigator.onLine && officerProfile.webhookUrl) {
     syncLeadToSheet(lead);
   }
 }
 
-// 14. RENDER CUSTOMER LEADS LIST (WITH BRANCH & STATUS FILTERING)
+// 14. RENDER CUSTOMER LEADS LIST (WITH BRANCH, STATUS, & DELETE ACTIONS)
 async function renderLeads() {
   const container = document.getElementById('leadsListContainer');
   const countSpan = document.getElementById('leadsCount');
@@ -1155,6 +1416,8 @@ async function renderLeads() {
     return;
   }
 
+  const statuses = ['New', 'Contacted', 'Follow-Up', 'Converted', 'Lost'];
+
   container.innerHTML = filtered.map(lead => {
     const cleanNote = cleanRawActionPayload(lead.notes || '');
     const badgeClass = 'badge-' + (lead.status || 'new').toLowerCase().replace(/[^a-z]/g, '');
@@ -1166,7 +1429,12 @@ async function renderLeads() {
             <div class="lead-name">${escapeHtml(lead.customerName)}</div>
             <div class="lead-phone">📞 ${escapeHtml(lead.mobile)} • 🏢 ${escapeHtml(lead.branchName || 'Main')}</div>
           </div>
-          <span class="badge ${badgeClass}">${escapeHtml(lead.status || 'New')}</span>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <select class="form-select" style="height: 28px; font-size: 0.72rem; padding: 0 6px; width: auto; font-weight: 700;" onchange="updateLeadStatus('${lead.id}', this.value)">
+              ${statuses.map(s => `<option value="${s}" ${(lead.status || 'New') === s ? 'selected' : ''}>${s}</option>`).join('')}
+            </select>
+            <span class="badge ${badgeClass}">${escapeHtml(lead.status || 'New')}</span>
+          </div>
         </div>
 
         <div style="font-size: 0.82rem; color: var(--primary); font-weight: 600; margin: 4px 0;">
@@ -1188,10 +1456,71 @@ async function renderLeads() {
           <button type="button" class="btn btn-outline" onclick="openTrackRecord('${lead.id}')">📜 History</button>
           <button type="button" class="btn btn-outline" onclick="openEditNoteModal('${lead.id}')">📝 Note</button>
           <button type="button" class="btn btn-outline" onclick="openFollowUpModal('${lead.id}')">📅 Follow-Up</button>
+          <button type="button" class="btn btn-outline" style="color: var(--danger); border-color: #FCA5A5;" onclick="deleteLead('${lead.id}')">🗑 Delete</button>
         </div>
       </div>
     `;
   }).join('');
+}
+
+async function updateLeadStatus(leadId, newStatus) {
+  const leads = await LocalDB.getAllLeads();
+  const lead = leads.find(l => l.id === leadId);
+  if (!lead) return;
+
+  const oldStatus = lead.status || 'New';
+  if (oldStatus === newStatus) return;
+
+  const now = Date.now();
+  lead.status = newStatus;
+  lead.syncStatus = 'pending_sync';
+  if (!lead.activities) lead.activities = [];
+
+  lead.activities.push({
+    id: 'stat-' + now,
+    timestamp: now,
+    actionType: 'status_change',
+    title: '🔄 Status Changed',
+    details: `${oldStatus} ➔ ${newStatus}`,
+    officerName: officerProfile.officerName,
+    officerId: officerProfile.staffId
+  });
+
+  await LocalDB.saveLead(lead);
+
+  if (fb) {
+    try {
+      await fb.setDoc('leads', lead.id, {
+        status: newStatus,
+        activities: lead.activities,
+        syncStatus: 'synced',
+        updatedAtMs: Date.now(),
+        updatedAt: fb.serverTimestamp()
+      }, true);
+      lead.syncStatus = 'synced';
+      await LocalDB.saveLead(lead);
+    } catch (e) {
+      console.warn('Firestore status sync notice:', e);
+    }
+  }
+
+  renderLeads();
+  if (navigator.onLine && officerProfile.webhookUrl) syncLeadToSheet(lead);
+}
+
+async function deleteLead(leadId) {
+  if (!confirm('Are you sure you want to delete this lead?')) return;
+
+  await LocalDB.deleteLead(leadId);
+  if (fb) {
+    try {
+      await fb.deleteDoc('leads', leadId);
+    } catch (e) {
+      console.warn('Firestore delete notice:', e);
+    }
+  }
+  await renderLeads();
+  updateSettingsStats();
 }
 
 // 15. WHATSAPP & SMS QUOTATIONS WITH LOGGING
@@ -1216,7 +1545,8 @@ async function sendQuotationWhatsApp(leadId = null) {
     amount = lead.loanAmount;
     tenure = lead.tenureMonths;
     emi = lead.monthlyEmi;
-    rate = currentProduct.defaultAnnualRate;
+    const matchedProd = BANK_PRODUCTS.find(p => p.id === lead.productId || p.name === lead.productName) || currentProduct;
+    rate = getApplicableRate(matchedProd, amount, tenure);
     fee = lead.processingFee;
     totalPayable = amount + lead.totalProfit;
   } else {
@@ -1329,10 +1659,16 @@ async function logApproach(leadId, type, title, detail) {
 
   await LocalDB.saveLead(lead);
 
-  // Sync to Firestore
-  if (db) {
+  if (fb) {
     try {
-      await db.collection('leads').document(lead.id).set(lead, { merge: true });
+      await fb.setDoc('leads', lead.id, {
+        ...lead,
+        syncStatus: 'synced',
+        updatedAtMs: Date.now(),
+        updatedAt: fb.serverTimestamp()
+      }, true);
+      lead.syncStatus = 'synced';
+      await LocalDB.saveLead(lead);
     } catch (e) {
       console.warn('Firestore activity sync notice:', e);
     }
@@ -1344,11 +1680,13 @@ async function logApproach(leadId, type, title, detail) {
 
 // 16. MODAL DIALOGS CONTROLLER
 function openModal(id) {
-  document.getElementById(id).classList.add('open');
+  const el = document.getElementById(id);
+  if (el) el.classList.add('open');
 }
 
 function closeModal(id) {
-  document.getElementById(id).classList.remove('open');
+  const el = document.getElementById(id);
+  if (el) el.classList.remove('open');
 }
 
 async function openTrackRecord(leadId) {
@@ -1422,10 +1760,16 @@ async function confirmSaveNote() {
 
   await LocalDB.saveLead(lead);
 
-  // Sync to Firestore
-  if (db) {
+  if (fb) {
     try {
-      await db.collection('leads').document(lead.id).set(lead, { merge: true });
+      await fb.setDoc('leads', lead.id, {
+        ...lead,
+        syncStatus: 'synced',
+        updatedAtMs: Date.now(),
+        updatedAt: fb.serverTimestamp()
+      }, true);
+      lead.syncStatus = 'synced';
+      await LocalDB.saveLead(lead);
     } catch (e) {
       console.warn('Firestore note sync notice:', e);
     }
@@ -1475,9 +1819,16 @@ async function confirmScheduleFollowUp() {
 
   await LocalDB.saveLead(lead);
 
-  if (db) {
+  if (fb) {
     try {
-      await db.collection('leads').document(lead.id).set(lead, { merge: true });
+      await fb.setDoc('leads', lead.id, {
+        ...lead,
+        syncStatus: 'synced',
+        updatedAtMs: Date.now(),
+        updatedAt: fb.serverTimestamp()
+      }, true);
+      lead.syncStatus = 'synced';
+      await LocalDB.saveLead(lead);
     } catch (e) {
       console.warn('Firestore follow-up sync notice:', e);
     }
@@ -1498,9 +1849,16 @@ async function confirmClearFollowUp() {
   lead.syncStatus = 'pending_sync';
   await LocalDB.saveLead(lead);
 
-  if (db) {
+  if (fb) {
     try {
-      await db.collection('leads').document(lead.id).set(lead, { merge: true });
+      await fb.setDoc('leads', lead.id, {
+        ...lead,
+        syncStatus: 'synced',
+        updatedAtMs: Date.now(),
+        updatedAt: fb.serverTimestamp()
+      }, true);
+      lead.syncStatus = 'synced';
+      await LocalDB.saveLead(lead);
     } catch (e) {
       console.warn('Firestore clear follow-up notice:', e);
     }
@@ -1580,11 +1938,12 @@ async function manualSync() {
   }
 
   // 1. Trigger Firestore fetch if authenticated
-  if (db && currentUser) {
+  if (fb && currentUser) {
     try {
-      const snap = await db.collection('leads').get();
-      snap.forEach(doc => {
-        LocalDB.saveLead({ id: doc.id, ...doc.data(), syncStatus: 'synced' });
+      const snap = await fb.getDocs('leads');
+      snap.forEach(docSnap => {
+        const d = docSnap.data();
+        LocalDB.saveLead({ id: d.id || docSnap.id, ...d, syncStatus: 'synced' });
       });
     } catch (e) {
       console.warn('Firestore manual sync notice:', e);
@@ -1595,6 +1954,7 @@ async function manualSync() {
   if (!officerProfile.webhookUrl) {
     await renderLeads();
     updateBranchFilterOptions();
+    updateSettingsStats();
     alert('✅ Synchronized with Firestore database!');
     return;
   }
@@ -1605,7 +1965,6 @@ async function manualSync() {
     await syncLeadToSheet(l);
   }
 
-  // Pull latest records from Sheet
   try {
     const res = await fetch(`${officerProfile.webhookUrl}?action=getLeads`, { method: 'GET' });
     if (res.ok) {
@@ -1656,11 +2015,10 @@ async function loadSettings() {
   officerProfile.branchName = await LocalDB.getSetting('branchName', 'Main Branch');
   officerProfile.webhookUrl = await LocalDB.getSetting('webhookUrl', '');
 
-  // Check if webhook url exists in Firestore config/global
-  if (!officerProfile.webhookUrl && db) {
+  if (!officerProfile.webhookUrl && fb) {
     try {
-      const configDoc = await db.collection('config').document('global').get();
-      if (configDoc.exists && configDoc.data().googleSheetsWebhookUrl) {
+      const configDoc = await fb.getDoc('config', 'global');
+      if (configDoc.exists() && configDoc.data().googleSheetsWebhookUrl) {
         officerProfile.webhookUrl = configDoc.data().googleSheetsWebhookUrl;
         await LocalDB.setSetting('webhookUrl', officerProfile.webhookUrl);
       }
@@ -1687,15 +2045,20 @@ async function saveSettings() {
   await LocalDB.setSetting('branchName', officerProfile.branchName);
   await LocalDB.setSetting('webhookUrl', officerProfile.webhookUrl);
 
-  // Sync profile to Firestore if signed in
-  if (db && currentUser) {
+  if (fb && currentUser) {
     try {
-      await db.collection('users').document(currentUser.uid).set({
+      const userData = {
+        uid: currentUser.uid,
+        email: currentUser.email || '',
         officerName: officerProfile.officerName,
         staffId: officerProfile.staffId,
         branchName: officerProfile.branchName,
         updatedAt: Date.now()
-      }, { merge: true });
+      };
+      await fb.setDoc('users', currentUser.uid, userData, true);
+      await fb.setDoc('config', 'global', {
+        registeredUsersMap: { [currentUser.uid]: userData }
+      }, true);
     } catch (e) {
       console.warn('Firestore profile sync error:', e);
     }

@@ -29,7 +29,7 @@
         <div style="margin-top: 6px; color: #F87171; font-weight: 700;">Status: Account Inactive / Blocked in Firestore</div>
       </div>
       <p style="font-size: 0.84rem; color: #94A3B8; margin-bottom: 18px; line-height: 1.5;">
-        برائے مہربانی ایپ استعمال کرنے کے لیے اپنے برانچ مینیجر یا ایڈمنسٹریٹر سے رابطہ کریں تاکہ وہ آپ کے اکاؤنٹ کو فعال کر سکیں۔
+        برائے مہربانی ایپ استعمال کرنے کے لیے اپنے برانچ مینیجر یا ایڈمنسٹریٹر سے رابطہ کریں تاکہ وہ آپ کے اکاؤنٹ کو اینڈرائیڈ ایڈمن پینل یا فائر اسٹور سے فعال (Allow) کر سکیں۔
       </p>
       <div class="btn-group">
         <button type="button" class="btn btn-outline" onclick="signOutUser()" style="color: white; border-color: #64748B;">Sign Out / لاگ آؤٹ</button>
@@ -161,7 +161,7 @@
 
         <!-- Filer Toggle for Deposits -->
         <div class="toggle-wrapper" id="filerToggleRow" style="display: none;">
-          <span style="font-size: 0.88rem; font-weight: 600;">Active Tax Filer (15% Tax vs 40% Non-Filer)</span>
+          <span id="filerToggleLabel" style="font-size: 0.88rem; font-weight: 600;">Active Tax Filer (20% Tax vs 40% Non-Filer)</span>
           <label class="toggle-switch">
             <input type="checkbox" id="isFilerToggle" checked onchange="calculate()">
             <span class="slider"></span>
@@ -267,7 +267,7 @@
         </div>
         <div class="result-row">
           <span>Access Status:</span>
-          <strong id="settingsAccessStatus" style="color: var(--success);">Authorized (Active)</strong>
+          <strong id="settingsAccessStatus" style="color: var(--success);">Local Guest Mode</strong>
         </div>
         <div class="result-row">
           <span>User Role:</span>
@@ -520,12 +520,111 @@
         </div>
       </div>
     </div>
+
+    <!-- MODAL 7: UNAUTHORIZED DOMAIN HELPER -->
+    <div class="modal-overlay" id="unauthorizedDomainModal">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <div class="modal-title" style="color: var(--danger);">🔐 Domain Authorization Required</div>
+          <button type="button" class="modal-close" onclick="closeModal('unauthorizedDomainModal')">&times;</button>
+        </div>
+        <div class="modal-body" style="font-size: 0.88rem; line-height: 1.55;">
+          <p style="margin-bottom: 10px; font-weight: 600; color: var(--text-main);">
+            برائے مہربانی اس ڈومین کو فائر بیس کنسول میں اتھورائزڈ لسٹ میں شامل کریں:
+          </p>
+          <div style="background: #F1F5F9; border: 1.5px solid #CBD5E1; border-radius: 8px; padding: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 14px;">
+            <code id="unauthorizedHostText" style="font-size: 0.84rem; color: var(--primary-dark); font-weight: 700; word-break: break-all;">github.io</code>
+            <button type="button" class="btn btn-primary" onclick="copyUnauthorizedHost()" style="width: auto; height: 34px; font-size: 0.78rem; padding: 0 12px;">📋 Copy</button>
+          </div>
+          <ol style="padding-left: 20px; margin-bottom: 14px; color: var(--text-main);">
+            <li>Open <strong>Firebase Console</strong> (<code style="font-size: 0.78rem;">gen-lang-client-0150363642</code>).</li>
+            <li>Go to <strong>Build ➔ Authentication ➔ Settings</strong>.</li>
+            <li>Click <strong>Authorized domains ➔ Add domain</strong>.</li>
+            <li>Add <strong>github.io</strong> (or the copied domain above) and click <strong>Add</strong>.</li>
+          </ol>
+          <button type="button" class="btn btn-primary" onclick="closeModal('unauthorizedDomainModal')">OK, Got It</button>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <!-- FIREBASE WEB COMPAT SDKS -->
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+  <!-- FIREBASE WEB MODULAR SDK BRIDGE (Supports Named Firestore Database) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+    import {
+      getAuth,
+      GoogleAuthProvider,
+      signInWithPopup,
+      signInWithRedirect,
+      getRedirectResult,
+      signOut,
+      onAuthStateChanged
+    } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+    import {
+      initializeFirestore,
+      persistentLocalCache,
+      persistentMultipleTabManager,
+      collection,
+      doc,
+      getDoc,
+      getDocs,
+      setDoc,
+      deleteDoc,
+      onSnapshot,
+      serverTimestamp
+    } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBH27yZeI9YVi0Ik1FoHFLDoO3PMjhPPnw",
+      authDomain: "gen-lang-client-0150363642.firebaseapp.com",
+      projectId: "gen-lang-client-0150363642",
+      storageBucket: "gen-lang-client-0150363642.firebasestorage.app",
+      messagingSenderId: "184681541597",
+      appId: "1:184681541597:android:e6b9e900f639d026fb1034"
+    };
+
+    const FIRESTORE_DB_ID = "ai-studio-android-kbloanca-5f0d5d03-e822-4052-b56a-dc1ece39eefb";
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    let db;
+    try {
+      db = initializeFirestore(app, {
+        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+      }, FIRESTORE_DB_ID);
+    } catch (e) {
+      db = initializeFirestore(app, {}, FIRESTORE_DB_ID);
+    }
+
+    window.FirebaseBridge = {
+      auth,
+      db,
+      onAuthStateChanged: (cb) => onAuthStateChanged(auth, cb),
+      signInWithGooglePopup: () => {
+        const provider = new GoogleAuthProvider();
+        provider.addScope("profile");
+        provider.addScope("email");
+        return signInWithPopup(auth, provider);
+      },
+      signInWithGoogleRedirect: () => {
+        const provider = new GoogleAuthProvider();
+        provider.addScope("profile");
+        provider.addScope("email");
+        return signInWithRedirect(auth, provider);
+      },
+      getRedirectResult: () => getRedirectResult(auth),
+      signOut: () => signOut(auth),
+      getDoc: (colName, docId) => getDoc(doc(db, colName, docId)),
+      getDocs: (colName) => getDocs(collection(db, colName)),
+      setDoc: (colName, docId, data, merge = true) => setDoc(doc(db, colName, docId), data, { merge }),
+      deleteDoc: (colName, docId) => deleteDoc(doc(db, colName, docId)),
+      onCollectionSnapshot: (colName, onNext, onErr) => onSnapshot(collection(db, colName), onNext, onErr),
+      onDocSnapshot: (colName, docId, onNext, onErr) => onSnapshot(doc(db, colName, docId), onNext, onErr),
+      serverTimestamp: () => serverTimestamp()
+    };
+
+    window.dispatchEvent(new Event("firebase-bridge-ready"));
+  </script>
 
   <script src="./app.js"></script>
 </body>
