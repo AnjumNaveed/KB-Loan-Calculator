@@ -438,14 +438,14 @@ function syncUiForSelectedProduct() {
 
   if (isLiab) {
     if (amountLabel) amountLabel.textContent = 'Desired Deposit Amount (PKR)';
-    if (amountInput) amountInput.placeholder = `Enter initial deposit (Min: ${formatPKR(currentProduct.minAmount || 25000)})`;
+    if (amountInput) amountInput.placeholder = `Min Deposit: ${formatPKR(currentProduct.minAmount || 25000)}`;
     if (dbrContent) dbrContent.style.display = 'none';
     if (depContent) depContent.style.display = 'block';
     if (amortQuickRow) amortQuickRow.style.display = 'none';
     if (viewColBtn) viewColBtn.textContent = `🛡️ View Deposit Rules & Terms (${currentProduct.name})`;
   } else {
     if (amountLabel) amountLabel.textContent = 'Desired Loan Amount (PKR)';
-    if (amountInput) amountInput.placeholder = 'Leave BLANK for Auto-Max plans up to tenure';
+    if (amountInput) amountInput.placeholder = 'Blank = Auto-Max from DBR';
     if (dbrContent) dbrContent.style.display = 'block';
     if (depContent) depContent.style.display = 'none';
     if (amortQuickRow) amortQuickRow.style.display = 'flex';
@@ -569,14 +569,14 @@ function calculate() {
     if (currentProduct.category === 'liability') {
       hintEl.style.color = 'var(--teal)';
       hintEl.textContent = rate <= 0
-        ? `Target Deposit: PKR ${formatPKR(amount)} • Current Account (0% Profit)`
-        : `Target Deposit: PKR ${formatPKR(amount)} • Profit Rate: ${rate}% p.a.`;
+        ? `Deposit: PKR ${formatPKR(amount)} • 0% Profit`
+        : `Deposit: PKR ${formatPKR(amount)} • ${rate}% p.a.`;
     } else if (isAutoMaxMode) {
       hintEl.style.color = 'var(--accent)';
-      hintEl.textContent = '⚡ DYNAMIC MODE: Blank amount auto-calculates MAX eligible loan per tenure from DBR.';
+      hintEl.textContent = '⚡ Auto-Max from DBR';
     } else {
       hintEl.style.color = 'var(--primary)';
-      hintEl.textContent = `Fixed Principal: PKR ${formatPKR(amount)} • Rate Applied: ${rate}%`;
+      hintEl.textContent = `Fixed: PKR ${formatPKR(amount)} @ ${rate}%`;
     }
   }
 
@@ -1118,7 +1118,7 @@ function buildSettlementText() {
     `• Remaining Tenure: ${document.getElementById('settleRemMonths').textContent}`,
     `• Total Remaining Liability: *${document.getElementById('settleTotalRem').textContent}*`,
     `────────────────────`,
-    `🏦 Officer: ${officerProfile.officerName} (${officerProfile.branchName})`
+    `🏦 Officer: ${officerProfile.officerName || 'Officer'} (${officerProfile.branchName || 'KBL Branch'})`
   ].join('\n');
 }
 
@@ -1127,7 +1127,7 @@ function shareSettlementWhatsApp() {
   const phone = formatForWhatsApp(mob);
   const txt = buildSettlementText();
   const url = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(txt)}` : `https://wa.me/?text=${encodeURIComponent(txt)}`;
-  window.open(url, '_blank');
+  openExternalWhatsAppUrl(url);
 }
 
 function shareSettlementSMS() {
@@ -1173,7 +1173,7 @@ function buildAmortizationShareText(includeRows = false) {
   }
 
   lines.push(`────────────────────`);
-  lines.push(`🏦 Officer: ${officerProfile.officerName} (${officerProfile.staffId}) • ${officerProfile.branchName}`);
+  lines.push(`🏦 Officer: ${officerProfile.officerName || 'Officer'} (${officerProfile.staffId || 'RO'}) • ${officerProfile.branchName || 'KBL Branch'}`);
   return lines.join('\n');
 }
 
@@ -1186,7 +1186,7 @@ function shareAmortizationWhatsApp(copyOnly = false) {
   const mob = document.getElementById('customerMobile').value.trim();
   const phone = formatForWhatsApp(mob);
   const url = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(txt)}` : `https://wa.me/?text=${encodeURIComponent(txt)}`;
-  window.open(url, '_blank');
+  openExternalWhatsAppUrl(url);
 }
 
 function shareAmortizationSMS() {
@@ -1215,8 +1215,8 @@ function printAmortizationPdf() {
         <div style="color: #475569; font-size: 10px;">Generated on ${new Date().toLocaleString()}</div>
       </div>
       <div style="text-align: right; font-size: 10px;">
-        <strong>Officer:</strong> ${escapeHtml(officerProfile.officerName)} (${escapeHtml(officerProfile.staffId)})<br>
-        <strong>Branch:</strong> ${escapeHtml(officerProfile.branchName)}
+        <strong>Officer:</strong> ${escapeHtml(officerProfile.officerName || 'Officer')} (${escapeHtml(officerProfile.staffId || 'RO')})<br>
+        <strong>Branch:</strong> ${escapeHtml(officerProfile.branchName || 'KBL Branch')}
       </div>
     </div>
 

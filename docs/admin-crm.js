@@ -142,15 +142,18 @@ function isSupervisorQueryAllowed(queryBranch) {
   if (!cleanQ) return true;
   if (!canCurrentUserUseSupervisorFilter()) return false;
   const effAllowed = getEffectiveAllowedBranch();
-  if (effAllowed.toUpperCase() === 'ALL' || effAllowed === '*') return true;
-  const cleanAllowed = normalizeBranchText(effAllowed);
-  const compactAllowed = canonicalBranchCode(effAllowed);
+  if (!effAllowed) return false;
+  const tokens = effAllowed.split(/[,;|]/).map(s => s.trim()).filter(Boolean);
+  if (tokens.some(t => t.toUpperCase() === 'ALL' || t === '*')) return true;
   const compactQ = canonicalBranchCode(queryBranch);
-  if (!cleanAllowed) return false;
-  return cleanQ === cleanAllowed ||
-    cleanAllowed.includes(cleanQ) ||
-    cleanQ.includes(cleanAllowed) ||
-    (compactQ.length >= 2 && (compactQ === compactAllowed || compactAllowed.includes(compactQ)));
+  return tokens.some(tok => {
+    const cleanAllowed = normalizeBranchText(tok);
+    const compactAllowed = canonicalBranchCode(tok);
+    return cleanQ === cleanAllowed ||
+      cleanAllowed.includes(cleanQ) ||
+      cleanQ.includes(cleanAllowed) ||
+      (compactQ.length >= 2 && (compactQ === compactAllowed || compactAllowed.includes(compactQ)));
+  });
 }
 
 function isLeadOwnedByCurrentOfficer(lead) {
@@ -164,14 +167,20 @@ function isLeadOwnedByCurrentOfficer(lead) {
 
 function getAllRegisteredUsersList() {
   const map = new Map();
-  if (globalConfig.registeredUsersMap && typeof globalConfig.registeredUsersMap === 'object') {
-    Object.entries(globalConfig.registeredUsersMap).forEach(([k, u]) => {
+  const mergeSource = (srcObj) => {
+    if (!srcObj || typeof srcObj !== 'object') return;
+    Object.entries(srcObj).forEach(([k, u]) => {
       if (u && typeof u === 'object') {
         const uid = u.uid || k;
-        map.set(uid, { uid, ...u });
+        const prev = map.get(uid);
+        if (!prev || (Number(u.updatedAt) || 0) >= (Number(prev.updatedAt) || 0)) {
+          map.set(uid, { uid, ...u });
+        }
       }
     });
-  }
+  };
+  mergeSource(globalConfig.registeredUsersMap);
+  mergeSource(globalConfig.liveUsersCollectionMap);
   return Array.from(map.values()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
@@ -192,15 +201,28 @@ function toggleMyBranchFilter() {
   const inp = document.getElementById('supervisorBranchInput');
   if (!inp) return;
   const effAllowed = getEffectiveAllowedBranch();
-  const targetBranch = effAllowed === 'ALL' ? (officerProfile.branchName || 'Main Branch') : effAllowed;
+  const firstAllowed = effAllowed.split(/[,;|]/).map(s => s.trim()).filter(Boolean)[0] || '';
+  const targetBranch = (!effAllowed || effAllowed.toUpperCase() === 'ALL')
+    ? (officerProfile.branchName || '')
+    : (officerProfile.branchName && isSupervisorQueryAllowed(officerProfile.branchName) ? officerProfile.branchName : firstAllowed);
 
   if (inp.value.trim()) {
     inp.value = '';
     myBranchFilterActive = false;
   } else {
+    if (!targetBranch) {
+      showToast('No assigned branch synced from Cloud yet.');
+      return;
+    }
     inp.value = targetBranch;
     myBranchFilterActive = true;
   }
+  renderLeads();
+}
+
+function setLeadsStatusFilter(status) {
+  const sel = document.getElementById('statusFilterSelect');
+  if (sel) sel.value = status || 'All';
   renderLeads();
 }
 
@@ -215,7 +237,7 @@ function getFilteredAuthorizedLeads(allLeads) {
 
   const canFilter = canCurrentUserUseSupervisorFilter();
   const effAllowed = getEffectiveAllowedBranch();
-  const hasAllRights = effAllowed.toUpperCase() === 'ALL' || effAllowed === '*';
+  const hasAllRights = effAllowed.split(/[,;|]/).some(t => t.trim().toUpperCase() === 'ALL' || t.trim() === '*');
   const unauthorizedQuery = supQuery && !isSupervisorQueryAllowed(supQuery);
 
   // Update Supervisor status banner
@@ -233,7 +255,9 @@ function getFilteredAuthorizedLeads(allLeads) {
       statusEl.textContent = `🚫 Access Denied for "${supQuery}" • Authorized only for: ${effAllowed || 'Own Leads'}`;
     } else if (hasAllRights) {
       statusEl.style.color = 'var(--success)';
-      statusEl.textContent = '🔓 Admin / Regional Rights: All Branches Allowed';
+      statusEl.textContent = supQuery
+        ? `🔓 Admin Filter Active: Showing branch "${supQuery}"`
+        : '🔓 Admin / Regional Rights: All Branches Allowed';
     } else {
       statusEl.style.color = 'var(--primary)';
       statusEl.textContent = `🛡️ Authorized Branch Scope: ${effAllowed || 'Own Branch'} (Viewing ${supQuery ? 'Branch Leads' : 'My Leads'})`;
@@ -241,30 +265,35 @@ function getFilteredAuthorizedLeads(allLeads) {
   }
 
   if (unauthorizedQuery) {
-    return { leads: [], authorizedScopeLeads: [] };
+    return {
+      leads: [],
+      authorizedScopeLeads: [],
+      scopeLabel: `Denied: "${supQuery}"`,
+      statusFilter,
+      search
+    };
   }
 
-  // First narrow by authorization scope
+  // Narrow by authorization scope AND active branch supervisor query (for Admins too)
   const scopeLeads = allLeads.filter(l => {
-    if (hasAllRights) return true;
     const effBranch = resolveLeadEffectiveBranch(l);
+    if (hasAllRights) {
+      return supQuery ? isBranchAuthorizedForQuery(supQuery, effBranch) : true;
+    }
     if (supQuery && canFilter) {
       return isBranchAuthorizedForQuery(supQuery, effBranch);
     }
     return isLeadOwnedByCurrentOfficer(l);
   });
 
-  // Then apply status, supervisor branch (if All Rights + query), and search text
+  // Apply search text + status filter
   const filtered = scopeLeads.filter(l => {
     const effBranch = resolveLeadEffectiveBranch(l);
-    if (hasAllRights && supQuery && !isBranchAuthorizedForQuery(supQuery, effBranch)) {
-      return false;
-    }
-    if (statusFilter !== 'All' && l.status !== statusFilter) return false;
+    if (statusFilter !== 'All' && (l.status || 'New') !== statusFilter) return false;
     if (search) {
       const hay = [
         l.customerName, l.mobile, l.productName, l.branchName,
-        effBranch, l.officerName, l.officerId, l.notes
+        effBranch, l.officerName, l.officerId, l.notes, l.locationAddress
       ].join(' ').toLowerCase();
       if (!hay.includes(search)) return false;
     }
@@ -272,29 +301,139 @@ function getFilteredAuthorizedLeads(allLeads) {
   });
 
   filtered.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  return { leads: filtered, authorizedScopeLeads: scopeLeads };
+
+  let baseScope = 'Personal Portfolio';
+  if (supQuery) baseScope = `Branch Scope: ${supQuery}`;
+  else if (hasAllRights) baseScope = 'All Branches (Admin Scope)';
+  else if (officerProfile.branchName) baseScope = `My Leads • ${officerProfile.branchName}`;
+
+  const parts = [baseScope];
+  if (statusFilter !== 'All') parts.push(`Status: ${statusFilter}`);
+  if (search) parts.push(`Search: "${search}"`);
+
+  return {
+    leads: filtered,
+    authorizedScopeLeads: scopeLeads,
+    scopeLabel: parts.join(' • ')
+  };
+}
+
+function buildGpsMiniMapHtml(lead) {
+  const lat = Number(lead.latitude);
+  const lng = Number(lead.longitude);
+  const hasCoords = lead.latitude !== null && lead.latitude !== undefined && lead.latitude !== '' &&
+    lead.longitude !== null && lead.longitude !== undefined && lead.longitude !== '' &&
+    !isNaN(lat) && !isNaN(lng) && !(lat === 0 && lng === 0);
+  const cleanAddr = (lead.locationAddress || '').trim();
+  const isGenericCoordAddr = /^GPS:\s*[-\d.]+\s*,\s*[-\d.]+$/i.test(cleanAddr);
+
+  if (!hasCoords && !cleanAddr) return '';
+
+  const timeNote = lead.locationCapturedAt ? ` • ${formatDate(lead.locationCapturedAt)}` : '';
+
+  if (!hasCoords && cleanAddr) {
+    const searchUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cleanAddr)}`;
+    return `
+      <div class="gps-addr-box">
+        <div><strong>📍 Location Captured${timeNote}:</strong> ${escapeHtml(cleanAddr)}</div>
+        <a href="${searchUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:4px;font-weight:800;color:var(--primary);text-decoration:none;">🗺️ Open in Google Maps ↗</a>
+      </div>
+    `;
+  }
+
+  const zoom = 15;
+  const n = 1 << zoom;
+  const clampedLat = Math.max(-85.0511, Math.min(85.0511, lat));
+  const latRad = (clampedLat * Math.PI) / 180.0;
+  const tileX = Math.floor(((lng + 180.0) / 360.0) * n);
+  const tileY = Math.floor(((1.0 - Math.log(Math.tan(latRad) + 1.0 / Math.cos(latRad)) / Math.PI) / 2.0) * n);
+
+  const tiles = [];
+  for (let dy = -1; dy <= 0; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/${zoom}/${tileY + dy}/${tileX + dx}`;
+      tiles.push(`<img src="${url}" alt="" loading="lazy" onerror="this.style.opacity='0'">`);
+    }
+  }
+
+  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+  const displayAddr = (!cleanAddr || isGenericCoordAddr) ? `GPS Coordinates: ${lat.toFixed(5)}, ${lng.toFixed(5)}` : cleanAddr;
+  const topPillText = (!cleanAddr || isGenericCoordAddr) ? `${lat.toFixed(4)}, ${lng.toFixed(4)}` : cleanAddr;
+
+  return `
+    <div class="gps-addr-box">
+      <strong>📍 Location Captured${timeNote}:</strong> ${escapeHtml(displayAddr)}
+    </div>
+    <a class="gps-map-card" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Tap to open location in Google Maps">
+      <div class="gps-tile-grid">${tiles.join('')}</div>
+      <div class="gps-map-top-badge">
+        <span class="gps-badge-pill">📍 ${escapeHtml(topPillText)}</span>
+        <span class="gps-badge-pill" style="max-width:none;">${lat.toFixed(4)}, ${lng.toFixed(4)}</span>
+      </div>
+      <div class="gps-pin-center">
+        <div class="gps-pin-pulse"></div>
+        <div class="gps-pin-marker">📍</div>
+      </div>
+      <div class="gps-map-footer">
+        <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(displayAddr)}</span>
+        <strong style="color:#FBBF24;white-space:nowrap;">Tap to open Google Maps ↗</strong>
+      </div>
+    </a>
+  `;
 }
 
 async function renderLeads() {
   const allLeads = await LocalDB.getAllLeads();
   const countSpan = document.getElementById('leadsCount');
-  const { leads: filtered, authorizedScopeLeads } = getFilteredAuthorizedLeads(allLeads);
+  const { leads: filtered, authorizedScopeLeads, scopeLabel } = getFilteredAuthorizedLeads(allLeads);
 
   if (countSpan) countSpan.textContent = authorizedScopeLeads.length;
 
-  // Update KPI Analytics Dashboard
-  const total = authorizedScopeLeads.length;
-  const converted = authorizedScopeLeads.filter(l => l.status === 'Converted').length;
-  const lost = authorizedScopeLeads.filter(l => l.status === 'Lost').length;
-  const activePipe = authorizedScopeLeads.filter(l => ['New', 'Contacted', 'Follow-Up'].includes(l.status || 'New')).length;
-  const winRate = total > 0 ? Math.round((converted / total) * 100) : 0;
+  // Update KPI Analytics Dashboard dynamically on filtered leads
+  const kpiLeads = filtered;
+  const total = kpiLeads.length;
+  const convertedList = kpiLeads.filter(l => (l.status || 'New') === 'Converted');
+  const lostList = kpiLeads.filter(l => (l.status || 'New') === 'Lost');
+  const activeList = kpiLeads.filter(l => !['Converted', 'Lost'].includes(l.status || 'New'));
+
+  const sumAmt = (arr) => arr.reduce((acc, item) => acc + (Number(item.loanAmount) || 0), 0);
+  const convertedAmount = sumAmt(convertedList);
+  const lostAmount = sumAmt(lostList);
+  const activeAmount = sumAmt(activeList);
+
+  const winRate = total > 0 ? Math.round((convertedList.length / total) * 100) : 0;
+  const wonWidthPct = total > 0 ? (convertedList.length / total) * 100 : 0;
+  const activeWidthPct = total > 0 ? (activeList.length / total) * 100 : 0;
+  const lostWidthPct = total > 0 ? (lostList.length / total) * 100 : 0;
+  const wonLabelPct = Math.round(wonWidthPct);
+  const activeLabelPct = Math.round(activeWidthPct);
+  const lostLabelPct = Math.round(lostWidthPct);
 
   const setKpi = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-  setKpi('kpiWinRate', `${winRate}%`);
+  const setWidth = (id, pct) => { const el = document.getElementById(id); if (el) el.style.width = `${pct.toFixed(1)}%`; };
+
+  setKpi('kpiScopeSubtitle', scopeLabel || 'Personal Portfolio');
+  setKpi('kpiWinRatePill', `🎯 ${winRate}% Win Rate`);
+  setKpi('kpiPortfolioCountLabel', `${total} Lead${total === 1 ? '' : 's'} Logged`);
+
+  setWidth('pbarWon', wonWidthPct);
+  setWidth('pbarActive', activeWidthPct);
+  setWidth('pbarLost', lostWidthPct);
+
+  setKpi('legWonText', `Won: ${convertedList.length} (${wonLabelPct}%)`);
+  setKpi('legActiveText', `Active: ${activeList.length} (${activeLabelPct}%)`);
+  setKpi('legLostText', `Lost: ${lostList.length} (${lostLabelPct}%)`);
+
   setKpi('kpiTotalLeads', total);
-  setKpi('kpiActivePipeline', activePipe);
-  setKpi('kpiConverted', converted);
-  setKpi('kpiLost', lost);
+  setKpi('kpiTotalSub', `${activeList.length} active • ${convertedList.length} won`);
+  setKpi('kpiActiveCountTag', `${activeList.length} Deals`);
+  setKpi('kpiActiveAmount', `PKR ${formatPKR(activeAmount)}`);
+  setKpi('kpiWonCountTag', `${convertedList.length} Won`);
+  setKpi('kpiConvertedAmount', `PKR ${formatPKR(convertedAmount)}`);
+  setKpi('kpiConvertedSub', `${convertedList.length} closed deal${convertedList.length === 1 ? '' : 's'} (${winRate}%)`);
+  setKpi('kpiLostCountTag', `${lostList.length} Lost`);
+  setKpi('kpiLostAmount', `PKR ${formatPKR(lostAmount)}`);
+  setKpi('kpiLostSub', `${lostList.length} dropped lead(s)`);
 
   const container = document.getElementById('leadsListContainer');
   if (!container) return;
@@ -316,9 +455,9 @@ async function renderLeads() {
     const isExpanded = expandedLeadIds.has(lead.id);
     const cleanNote = cleanRawActionPayload(lead.notes || '');
     const badgeClass = 'badge-' + (lead.status || 'new').toLowerCase().replace(/[^a-z]/g, '');
-    const effBranch = resolveLeadEffectiveBranch(lead) || 'Main Branch';
-    const hasGps = lead.latitude && lead.longitude;
-    const locText = lead.locationAddress || (hasGps ? `${Number(lead.latitude).toFixed(4)}, ${Number(lead.longitude).toFixed(4)}` : '');
+    const effBranch = resolveLeadEffectiveBranch(lead) || 'Unassigned';
+    const hasGps = (lead.latitude != null && lead.longitude != null && !(Number(lead.latitude) === 0 && Number(lead.longitude) === 0)) || Boolean((lead.locationAddress || '').trim());
+    const mapCardHtml = buildGpsMiniMapHtml(lead);
 
     return `
       <div class="lead-card ${isExpanded ? 'expanded' : ''}" id="lead-card-${lead.id}">
@@ -332,7 +471,7 @@ async function renderLeads() {
               📞 ${escapeHtml(lead.mobile || 'N/A')} • 💼 ${escapeHtml(lead.productName)} • <strong>PKR ${formatPKR(lead.loanAmount)}</strong> (${lead.tenureMonths}M)
             </div>
             <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 3px;">
-              👤 ${escapeHtml(lead.officerName || 'RO')} (${escapeHtml(lead.officerId || 'N/A')}) • 🏢 ${escapeHtml(effBranch)} • 📊 Approaches: <strong>${lead.approachCount || 1}</strong> ${locText ? '• 📍 GPS' : ''}
+              👤 ${escapeHtml(lead.officerName || 'RO')} (${escapeHtml(lead.officerId || 'N/A')}) • 🏢 ${escapeHtml(effBranch)} • 📊 Approaches: <strong>${lead.approachCount || 1}</strong> ${hasGps ? '• 📍 GPS' : ''}
             </div>
           </div>
           <span class="admin-chevron">${isExpanded ? 'Hide ▴' : 'Details ▾'}</span>
@@ -348,9 +487,9 @@ async function renderLeads() {
             ${lead.monthlyIncome ? `<div><strong>Income / DBR:</strong> PKR ${formatPKR(lead.monthlyIncome)} (${lead.dbrAllowed || 50}%)</div>` : ''}
             <div><strong>Follow-Up:</strong> ${lead.followUpDate ? escapeHtml(lead.followUpDate) : 'None'}</div>
             <div><strong>Cloud Sync:</strong> ${lead.syncStatus === 'synced' ? '✅ Synced' : '⏳ Pending'}</div>
-            ${locText ? `<div style="grid-column: 1 / -1;"><strong>📍 Location Captured:</strong> ${escapeHtml(locText)} ${lead.locationCapturedAt ? '(' + formatDate(lead.locationCapturedAt) + ')' : ''}</div>` : ''}
           </div>
 
+          ${mapCardHtml}
           ${cleanNote ? `<div class="lead-notes-box">📝 <strong>Note:</strong> ${escapeHtml(cleanNote)}</div>` : ''}
 
           <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
@@ -367,7 +506,6 @@ async function renderLeads() {
             <button type="button" class="btn btn-outline" onclick="openTrackRecord('${lead.id}')">📜 History (${(lead.activities || []).length})</button>
             <button type="button" class="btn btn-outline" onclick="openEditNoteModal('${lead.id}')">📝 Note</button>
             <button type="button" class="btn btn-outline" onclick="openFollowUpModal('${lead.id}')">📅 Follow-Up</button>
-            <button type="button" class="btn btn-outline" style="color: var(--danger); border-color: rgba(220,38,38,0.4);" onclick="deleteLead('${lead.id}')">🗑 Delete</button>
           </div>
         </div>
       </div>
@@ -387,9 +525,11 @@ function toggleLeadCardExpand(leadId) {
 }
 
 async function exportFilteredLeadsCsv() {
-  const allLeads = await LocalDB.getAllLeads();
-  const { leads } = getFilteredAuthorizedLeads(allLeads);
-  downloadLeadsAsCsv(leads, `kbl-leads-${new Date().toISOString().slice(0, 10)}.csv`);
+  await withLoading('Preparing CSV Export...', async () => {
+    const allLeads = await LocalDB.getAllLeads();
+    const { leads } = getFilteredAuthorizedLeads(allLeads);
+    downloadLeadsAsCsv(leads, `kbl-leads-${new Date().toISOString().slice(0, 10)}.csv`);
+  });
 }
 
 function downloadLeadsAsCsv(leads, filename) {
@@ -398,27 +538,59 @@ function downloadLeadsAsCsv(leads, filename) {
     return;
   }
   const headers = [
-    'Lead ID', 'Created At', 'Customer Name', 'Mobile', 'DOB', 'Age',
-    'Category', 'Product', 'Amount', 'Tenure (M)', 'Monthly EMI / Profit',
-    'Total Profit', 'Fee', 'Status', 'Follow-Up Date', 'Officer', 'Staff ID',
-    'Branch', 'Notes', 'Approaches', 'Location'
+    'Lead ID', 'Date Created', 'Customer Name', 'Mobile Number', 'Category',
+    'Product Name', 'Loan / Deposit Amount', 'Tenure (M)', 'Monthly EMI / Profit',
+    'Total Profit', 'Processing Fee', 'Status', 'Follow-up Date', 'Officer Name',
+    'Staff ID', 'Branch Name', 'Current Notes', 'Approaches Count', 'Location Address', 'Audit Log'
   ];
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const rows = leads.map(l => [
-    l.id, formatDate(l.createdAt || Date.now()), l.customerName, l.mobile, l.dob || '', l.age || '',
-    l.category, l.productName, l.loanAmount, l.tenureMonths, l.monthlyEmi,
-    l.totalProfit, l.processingFee, l.status, l.followUpDate || '', l.officerName, l.officerId,
-    l.branchName, cleanRawActionPayload(l.notes || ''), l.approachCount || 1,
-    l.locationAddress || (l.latitude ? `${l.latitude},${l.longitude}` : '')
-  ].map(esc).join(','));
+  const rows = leads.map(l => {
+    const effBranch = resolveLeadEffectiveBranch(l) || '';
+    const activities = Array.isArray(l.activities)
+      ? l.activities.slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+      : [];
+    const auditLog = activities.map(act => {
+      const actTime = formatDate(act.timestamp);
+      const cleanDetail = cleanRawActionPayload(act.details || '');
+      return `• [${actTime}] ${act.title || ''}: ${cleanDetail} - By: ${act.officerName || 'Officer'}`;
+    }).join('\n');
+    const locAddress = l.locationAddress ||
+      (l.latitude != null && l.longitude != null && !(Number(l.latitude) === 0 && Number(l.longitude) === 0)
+        ? `GPS: ${l.latitude}, ${l.longitude}`
+        : '');
 
-  const csv = [headers.map(esc).join(','), ...rows].join('\n');
+    return [
+      l.id,
+      formatDate(l.createdAt || Date.now()),
+      l.customerName || '',
+      l.mobile || '',
+      l.category || 'asset',
+      l.productName || '',
+      l.loanAmount || 0,
+      l.tenureMonths || 0,
+      l.monthlyEmi || 0,
+      l.totalProfit || 0,
+      l.processingFee || 0,
+      l.status || 'New',
+      l.followUpDate || '',
+      l.officerName || '',
+      l.officerId || '',
+      effBranch,
+      cleanRawActionPayload(l.notes || ''),
+      l.approachCount || (activities.length || 1),
+      locAddress,
+      auditLog
+    ].map(esc).join(',');
+  });
+
+  const csv = '\uFEFF' + [headers.map(esc).join(','), ...rows].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
   a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
   showToast(`📥 Exported ${leads.length} leads to CSV`);
 }
 
@@ -430,31 +602,33 @@ async function unlockAdminPanel() {
   const errEl = document.getElementById('adminPinError');
   errEl.style.display = 'none';
 
-  let firestorePin = globalConfig.adminPin || 'Admin123';
-  if (fb) {
-    try {
-      const docSnap = await fb.getDoc('config', 'global');
-      if (docSnap.exists() && docSnap.data().adminPin) {
-        firestorePin = docSnap.data().adminPin;
-        globalConfig.adminPin = firestorePin;
+  await withLoading('Verifying Admin Password...', async () => {
+    let firestorePin = globalConfig.adminPin || 'Admin123';
+    if (fb) {
+      try {
+        const docSnap = await fb.getDoc('config', 'global');
+        if (docSnap.exists() && docSnap.data().adminPin) {
+          firestorePin = docSnap.data().adminPin;
+          globalConfig.adminPin = firestorePin;
+        }
+      } catch (e) {
+        console.warn('Admin PIN fetch warning:', e);
       }
-    } catch (e) {
-      console.warn('Admin PIN fetch warning:', e);
     }
-  }
 
-  if (entered === firestorePin) {
-    adminUnlocked = true;
-    document.getElementById('adminPinInput').value = '';
-    document.getElementById('adminLockScreen').style.display = 'none';
-    document.getElementById('adminUnlockedContent').style.display = 'block';
-    document.getElementById('adminNavIcon').textContent = '🔓';
-    populateAdminControls();
-    showToast('🔓 Admin Console Unlocked');
-  } else {
-    errEl.style.display = 'block';
-    errEl.textContent = '❌ غلط ایڈمن پاسورڈ! براہ کرم فائر اسٹور والا درست پاسورڈ درج کریں۔';
-  }
+    if (entered === firestorePin) {
+      adminUnlocked = true;
+      document.getElementById('adminPinInput').value = '';
+      document.getElementById('adminLockScreen').style.display = 'none';
+      document.getElementById('adminUnlockedContent').style.display = 'block';
+      document.getElementById('adminNavIcon').textContent = '🔓';
+      populateAdminControls();
+      showToast('🔓 Admin Console Unlocked');
+    } else {
+      errEl.style.display = 'block';
+      errEl.textContent = '❌ غلط ایڈمن پاسورڈ! براہ کرم فائر اسٹور والا درست پاسورڈ درج کریں۔';
+    }
+  });
 }
 
 function lockAdminPanel() {
@@ -533,24 +707,24 @@ function applyThemeMode(mode) {
 // Card 2: Google Sheets Integration
 async function adminSaveSheetsUrl() {
   const url = document.getElementById('adminWebhookUrl').value.trim();
-  officerProfile.webhookUrl = url;
-  globalConfig.googleSheetsWebhookUrl = url;
-  await LocalDB.setSetting('webhookUrl', url);
-  const settingsInp = document.getElementById('settingsWebhookUrl');
-  if (settingsInp) settingsInp.value = url;
+  await withLoading('Saving Google Sheets URL...', async () => {
+    officerProfile.webhookUrl = url;
+    globalConfig.googleSheetsWebhookUrl = url;
+    await LocalDB.setSetting('webhookUrl', url);
 
-  if (fb) {
-    try {
-      await fb.setDoc('config', 'global', {
-        googleSheetsWebhookUrl: url,
-        updatedAt: fb.serverTimestamp()
-      }, true);
-    } catch (e) {
-      console.warn('Error saving webhook URL:', e);
+    if (fb) {
+      try {
+        await fb.setDoc('config', 'global', {
+          googleSheetsWebhookUrl: url,
+          updatedAt: fb.serverTimestamp()
+        }, true);
+      } catch (e) {
+        console.warn('Error saving webhook URL:', e);
+      }
     }
-  }
-  populateAdminControls();
-  showToast('✅ Google Sheets Webhook URL synced globally!');
+    populateAdminControls();
+    showToast('✅ Google Sheets Webhook URL synced globally!');
+  });
 }
 
 function copyAppsScriptCode() {
@@ -572,32 +746,34 @@ async function adminUpdatePassword() {
     return;
   }
 
-  let currentPin = globalConfig.adminPin || 'Admin123';
-  if (fb) {
-    try {
-      const docSnap = await fb.getDoc('config', 'global');
-      if (docSnap.exists() && docSnap.data().adminPin) {
-        currentPin = docSnap.data().adminPin;
+  await withLoading('Updating Admin Password...', async () => {
+    let currentPin = globalConfig.adminPin || 'Admin123';
+    if (fb) {
+      try {
+        const docSnap = await fb.getDoc('config', 'global');
+        if (docSnap.exists() && docSnap.data().adminPin) {
+          currentPin = docSnap.data().adminPin;
+        }
+        if (oldPin !== currentPin) {
+          showToast('❌ Current Admin Password does not match Firestore!');
+          return;
+        }
+        await fb.setDoc('config', 'global', {
+          adminPin: newPin,
+          updatedAt: fb.serverTimestamp()
+        }, true);
+        globalConfig.adminPin = newPin;
+        document.getElementById('oldAdminPinInput').value = '';
+        document.getElementById('newAdminPinInput').value = '';
+        document.getElementById('confirmAdminPinInput').value = '';
+        showToast('🔑 Admin Password updated in Firestore!');
+      } catch (e) {
+        showToast('Error updating password: ' + e.message);
       }
-      if (oldPin !== currentPin) {
-        showToast('❌ Current Admin Password does not match Firestore!');
-        return;
-      }
-      await fb.setDoc('config', 'global', {
-        adminPin: newPin,
-        updatedAt: fb.serverTimestamp()
-      }, true);
-      globalConfig.adminPin = newPin;
-      document.getElementById('oldAdminPinInput').value = '';
-      document.getElementById('newAdminPinInput').value = '';
-      document.getElementById('confirmAdminPinInput').value = '';
-      showToast('🔑 Admin Password updated in Firestore!');
-    } catch (e) {
-      showToast('Error updating password: ' + e.message);
+    } else {
+      showToast('Firebase offline — cannot update global password.');
     }
-  } else {
-    showToast('Firebase offline — cannot update global password.');
-  }
+  });
 }
 
 // Card 4: Global FED & WHT Tax Rates
@@ -607,24 +783,26 @@ async function adminSaveTaxAndFedConfig() {
   const nonFilerTaxRate = parseFloat(document.getElementById('adminNonFilerTaxRate').value) || 40.0;
   const currency = document.getElementById('adminCurrency').value.trim() || 'PKR';
 
-  globalConfig.fedRate = fedRate;
-  globalConfig.filerTaxRate = filerTaxRate;
-  globalConfig.nonFilerTaxRate = nonFilerTaxRate;
-  globalConfig.currency = currency;
+  await withLoading('Syncing Tax & FED Rates...', async () => {
+    globalConfig.fedRate = fedRate;
+    globalConfig.filerTaxRate = filerTaxRate;
+    globalConfig.nonFilerTaxRate = nonFilerTaxRate;
+    globalConfig.currency = currency;
 
-  if (fb) {
-    try {
-      await fb.setDoc('config', 'global', {
-        fedRate, filerTaxRate, nonFilerTaxRate, currency,
-        updatedAt: fb.serverTimestamp()
-      }, true);
-    } catch (e) {
-      console.warn('Error saving global tax config:', e);
+    if (fb) {
+      try {
+        await fb.setDoc('config', 'global', {
+          fedRate, filerTaxRate, nonFilerTaxRate, currency,
+          updatedAt: fb.serverTimestamp()
+        }, true);
+      } catch (e) {
+        console.warn('Error saving global tax config:', e);
+      }
     }
-  }
-  calculate();
-  populateAdminControls();
-  showToast('✅ Global FED & WHT rates synced!');
+    calculate();
+    populateAdminControls();
+    showToast('✅ Global FED & WHT rates synced!');
+  });
 }
 
 // Card 5: Admin Broadcast Notice
@@ -634,38 +812,42 @@ async function adminPublishBroadcast() {
     showToast('Enter a broadcast notice message first.');
     return;
   }
-  const broadcastId = 'brd-' + Date.now();
-  globalConfig.adminBroadcastMessage = msg;
-  globalConfig.adminBroadcastId = broadcastId;
+  await withLoading('Publishing Broadcast Notice...', async () => {
+    const broadcastId = 'brd-' + Date.now();
+    globalConfig.adminBroadcastMessage = msg;
+    globalConfig.adminBroadcastId = broadcastId;
 
-  if (fb) {
-    try {
-      await fb.setDoc('config', 'global', {
-        adminBroadcastMessage: msg,
-        adminBroadcastId: broadcastId,
-        updatedAt: fb.serverTimestamp()
-      }, true);
-      showToast('📢 Broadcast Notice published to all users!');
-    } catch (e) {
-      showToast('Error publishing broadcast: ' + e.message);
+    if (fb) {
+      try {
+        await fb.setDoc('config', 'global', {
+          adminBroadcastMessage: msg,
+          adminBroadcastId: broadcastId,
+          updatedAt: fb.serverTimestamp()
+        }, true);
+        showToast('📢 Broadcast Notice published to all users!');
+      } catch (e) {
+        showToast('Error publishing broadcast: ' + e.message);
+      }
     }
-  }
+  });
 }
 
 async function adminClearBroadcast() {
-  document.getElementById('adminBroadcastInput').value = '';
-  globalConfig.adminBroadcastMessage = '';
-  globalConfig.adminBroadcastId = '';
-  if (fb) {
-    try {
-      await fb.setDoc('config', 'global', {
-        adminBroadcastMessage: '',
-        adminBroadcastId: '',
-        updatedAt: fb.serverTimestamp()
-      }, true);
-      showToast('🗑️ Broadcast Notice cleared.');
-    } catch (e) {}
-  }
+  await withLoading('Clearing Broadcast Notice...', async () => {
+    document.getElementById('adminBroadcastInput').value = '';
+    globalConfig.adminBroadcastMessage = '';
+    globalConfig.adminBroadcastId = '';
+    if (fb) {
+      try {
+        await fb.setDoc('config', 'global', {
+          adminBroadcastMessage: '',
+          adminBroadcastId: '',
+          updatedAt: fb.serverTimestamp()
+        }, true);
+        showToast('🗑️ Broadcast Notice cleared.');
+      } catch (e) {}
+    }
+  });
 }
 
 async function checkAndShowBroadcastModal() {
@@ -694,44 +876,48 @@ async function adminPublishAppUpdate() {
   const msg = document.getElementById('adminUpdateMsgInput').value.trim() || 'New KBL App Update Available';
   const updateId = url ? ('upd-' + Date.now()) : '';
 
-  globalConfig.appUpdateUrl = url;
-  globalConfig.appUpdateMessage = msg;
-  globalConfig.appUpdateId = updateId;
+  await withLoading('Publishing App Update Notice...', async () => {
+    globalConfig.appUpdateUrl = url;
+    globalConfig.appUpdateMessage = msg;
+    globalConfig.appUpdateId = updateId;
 
-  if (fb) {
-    try {
-      await fb.setDoc('config', 'global', {
-        appUpdateUrl: url,
-        appUpdateMessage: msg,
-        appUpdateId: updateId,
-        updatedAt: fb.serverTimestamp()
-      }, true);
-      updateAppUpdateBanner();
-      populateAdminControls();
-      showToast('🚀 App Update notice published!');
-    } catch (e) {
-      showToast('Error publishing update: ' + e.message);
+    if (fb) {
+      try {
+        await fb.setDoc('config', 'global', {
+          appUpdateUrl: url,
+          appUpdateMessage: msg,
+          appUpdateId: updateId,
+          updatedAt: fb.serverTimestamp()
+        }, true);
+        updateAppUpdateBanner();
+        populateAdminControls();
+        showToast('🚀 App Update notice published!');
+      } catch (e) {
+        showToast('Error publishing update: ' + e.message);
+      }
     }
-  }
+  });
 }
 
 async function adminClearAppUpdate() {
-  document.getElementById('adminUpdateUrlInput').value = '';
-  document.getElementById('adminUpdateMsgInput').value = '';
-  globalConfig.appUpdateUrl = '';
-  globalConfig.appUpdateMessage = '';
-  globalConfig.appUpdateId = '';
-  if (fb) {
-    try {
-      await fb.setDoc('config', 'global', {
-        appUpdateUrl: '', appUpdateMessage: '', appUpdateId: '',
-        updatedAt: fb.serverTimestamp()
-      }, true);
-    } catch (e) {}
-  }
-  updateAppUpdateBanner();
-  populateAdminControls();
-  showToast('Cleared App Update link.');
+  await withLoading('Clearing App Update Link...', async () => {
+    document.getElementById('adminUpdateUrlInput').value = '';
+    document.getElementById('adminUpdateMsgInput').value = '';
+    globalConfig.appUpdateUrl = '';
+    globalConfig.appUpdateMessage = '';
+    globalConfig.appUpdateId = '';
+    if (fb) {
+      try {
+        await fb.setDoc('config', 'global', {
+          appUpdateUrl: '', appUpdateMessage: '', appUpdateId: '',
+          updatedAt: fb.serverTimestamp()
+        }, true);
+      } catch (e) {}
+    }
+    updateAppUpdateBanner();
+    populateAdminControls();
+    showToast('Cleared App Update link.');
+  });
 }
 
 function updateAppUpdateBanner() {
@@ -940,52 +1126,56 @@ async function confirmSaveProduct() {
   if (idx >= 0) BANK_PRODUCTS[idx] = updated;
   else BANK_PRODUCTS.push(updated);
 
-  if (fb) {
-    try {
-      await fb.setDoc('products', pId, {
-        id: pId,
-        name,
-        category,
-        rateType,
-        defaultAnnualRate: rate,
-        defaultFeeValue: fee,
-        feeType: 'percentage',
-        fedRate: globalConfig.fedRate || 16.0,
-        minAmount,
-        maxAmount,
-        minTenure,
-        maxTenure,
-        minAge,
-        maxAgeAtMaturity,
-        collateralDetails,
-        rateSlabs,
-        feeSlabs,
-        updatedAt: fb.serverTimestamp()
-      }, true);
-    } catch (e) {
-      console.warn('Product save error:', e);
+  await withLoading('Saving Product & Slabs...', async () => {
+    if (fb) {
+      try {
+        await fb.setDoc('products', pId, {
+          id: pId,
+          name,
+          category,
+          rateType,
+          defaultAnnualRate: rate,
+          defaultFeeValue: fee,
+          feeType: 'percentage',
+          fedRate: globalConfig.fedRate || 16.0,
+          minAmount,
+          maxAmount,
+          minTenure,
+          maxTenure,
+          minAge,
+          maxAgeAtMaturity,
+          collateralDetails,
+          rateSlabs,
+          feeSlabs,
+          updatedAt: fb.serverTimestamp()
+        }, true);
+      } catch (e) {
+        console.warn('Product save error:', e);
+      }
     }
-  }
 
-  closeModal('editProductModal');
-  populateProducts(pId);
-  calculate();
-  renderAdminProductsList();
-  showToast('✅ Product & Slabs saved to Firestore!');
+    closeModal('editProductModal');
+    populateProducts(pId);
+    calculate();
+    renderAdminProductsList();
+    showToast('✅ Product & Slabs saved to Firestore!');
+  });
 }
 
 async function deleteAdminProduct(productId) {
   if (!confirm('Delete this product from Firestore globally?')) return;
-  BANK_PRODUCTS = BANK_PRODUCTS.filter(p => p.id !== productId);
-  if (fb) {
-    try {
-      await fb.deleteDoc('products', productId);
-    } catch (e) {}
-  }
-  populateProducts();
-  calculate();
-  renderAdminProductsList();
-  showToast('🗑️ Product deleted.');
+  await withLoading('Deleting Product...', async () => {
+    BANK_PRODUCTS = BANK_PRODUCTS.filter(p => p.id !== productId);
+    if (fb) {
+      try {
+        await fb.deleteDoc('products', productId);
+      } catch (e) {}
+    }
+    populateProducts();
+    calculate();
+    renderAdminProductsList();
+    showToast('🗑️ Product deleted.');
+  });
 }
 
 function exportProductsJson() {
@@ -1000,43 +1190,50 @@ function exportProductsJson() {
 async function confirmBulkImportProducts() {
   const raw = document.getElementById('bulkImportTextarea').value.trim();
   if (!raw) return;
-  try {
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) throw new Error('Expected JSON array.');
-    for (const p of arr) {
-      const pId = p.id || ('prod-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5));
-      if (fb) {
-        await fb.setDoc('products', pId, { ...p, id: pId, updatedAt: fb.serverTimestamp() }, true);
+  await withLoading('Importing Products...', async () => {
+    try {
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) throw new Error('Expected JSON array.');
+      for (const p of arr) {
+        const pId = p.id || ('prod-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5));
+        if (fb) {
+          await fb.setDoc('products', pId, { ...p, id: pId, updatedAt: fb.serverTimestamp() }, true);
+        }
       }
+      closeModal('bulkImportModal');
+      showToast(`✅ Imported ${arr.length} products to Firestore!`);
+    } catch (e) {
+      showToast('❌ Invalid JSON: ' + e.message);
     }
-    closeModal('bulkImportModal');
-    showToast(`✅ Imported ${arr.length} products to Firestore!`);
-  } catch (e) {
-    showToast('❌ Invalid JSON: ' + e.message);
-  }
+  });
 }
 
 // Card 8: User Access & Branch Rights
 async function refreshAdminUsersFromFirestore() {
   if (!fb) return;
-  try {
-    const gDoc = await fb.getDoc('config', 'global');
-    const regMap = gDoc.exists() ? { ...(gDoc.data().registeredUsersMap || {}) } : {};
-    const usersSnap = await fb.getDocs('users');
-    usersSnap.forEach(d => {
-      const u = d.data();
-      const uid = u.uid || d.id;
-      const prev = regMap[uid];
-      if (!prev || (Number(u.updatedAt) || 0) >= (Number(prev.updatedAt) || 0)) {
-        regMap[uid] = { uid, ...u };
-      }
-    });
-    globalConfig.registeredUsersMap = regMap;
-    renderAdminUsersList();
-    showToast('🔄 Refreshed user registry');
-  } catch (e) {
-    showToast('Refresh notice: ' + e.message);
-  }
+  await withLoading('Refreshing User Registry...', async () => {
+    try {
+      const gDoc = await fb.getDoc('config', 'global');
+      const regMap = gDoc.exists() ? { ...(gDoc.data().registeredUsersMap || {}) } : {};
+      const usersSnap = await fb.getDocs('users');
+      const liveMap = {};
+      usersSnap.forEach(d => {
+        const u = d.data();
+        const uid = u.uid || d.id;
+        liveMap[uid] = { uid, ...u };
+        const prev = regMap[uid];
+        if (!prev || (Number(u.updatedAt) || 0) >= (Number(prev.updatedAt) || 0)) {
+          regMap[uid] = { uid, ...u };
+        }
+      });
+      globalConfig.registeredUsersMap = regMap;
+      globalConfig.liveUsersCollectionMap = liveMap;
+      renderAdminUsersList();
+      showToast('🔄 Refreshed user registry');
+    } catch (e) {
+      showToast('Refresh notice: ' + e.message);
+    }
+  });
 }
 
 function renderAdminUsersList() {
@@ -1089,8 +1286,10 @@ async function toggleUserBlockedStatus(uid) {
   const user = users.find(u => u.uid === uid);
   if (!user) return;
   const updated = { ...user, isBlocked: !(user.isBlocked === true), updatedAt: Date.now() };
-  await saveUserAccessRecordToFirestore(updated);
-  showToast(updated.isBlocked ? `🚫 Blocked ${updated.officerName}` : `✅ Allowed ${updated.officerName}`);
+  await withLoading('Updating User Access...', async () => {
+    await saveUserAccessRecordToFirestore(updated);
+    showToast(updated.isBlocked ? `🚫 Blocked ${updated.officerName}` : `✅ Allowed ${updated.officerName}`);
+  });
 }
 
 function openEditUserAccessModal(uid = null) {
@@ -1126,13 +1325,18 @@ async function confirmSaveUserAccess() {
     updatedAt: Date.now()
   };
 
-  await saveUserAccessRecordToFirestore(userObj);
-  closeModal('editUserAccessModal');
-  showToast('✅ User rights synced to Firestore!');
+  await withLoading('Syncing User Rights...', async () => {
+    await saveUserAccessRecordToFirestore(userObj);
+    closeModal('editUserAccessModal');
+    showToast('✅ User rights synced to Firestore!');
+  });
 }
 
 async function saveUserAccessRecordToFirestore(userObj) {
   globalConfig.registeredUsersMap[userObj.uid] = userObj;
+  if (globalConfig.liveUsersCollectionMap) {
+    globalConfig.liveUsersCollectionMap[userObj.uid] = userObj;
+  }
   renderAdminUsersList();
   if (fb) {
     try {
@@ -1149,20 +1353,25 @@ async function saveUserAccessRecordToFirestore(userObj) {
 
 async function deleteAdminUser(uid) {
   if (!confirm('Permanently delete this user record from Firestore?')) return;
-  delete globalConfig.registeredUsersMap[uid];
-  renderAdminUsersList();
-  if (fb) {
-    try {
-      await fb.setDoc('config', 'global', {
-        registeredUsersMap: { [uid]: fb.deleteField() },
-        updatedAt: fb.serverTimestamp()
-      }, true);
-      await fb.deleteDoc('users', uid);
-      showToast('🗑️ User removed from Firestore');
-    } catch (e) {
-      showToast('Error deleting user: ' + e.message);
+  await withLoading('Removing User Record...', async () => {
+    delete globalConfig.registeredUsersMap[uid];
+    if (globalConfig.liveUsersCollectionMap) {
+      delete globalConfig.liveUsersCollectionMap[uid];
     }
-  }
+    renderAdminUsersList();
+    if (fb) {
+      try {
+        await fb.setDoc('config', 'global', {
+          registeredUsersMap: { [uid]: fb.deleteField() },
+          updatedAt: fb.serverTimestamp()
+        }, true);
+        await fb.deleteDoc('users', uid);
+        showToast('🗑️ User removed from Firestore');
+      } catch (e) {
+        showToast('Error deleting user: ' + e.message);
+      }
+    }
+  });
 }
 
 // Card 9: Lead Database Management
@@ -1214,7 +1423,7 @@ async function renderAdminLeadsDbList() {
           <input type="checkbox" ${checked} onchange="toggleAdminLeadCheck('${l.id}', this.checked)" style="margin-top:4px;">
           <div class="manage-info">
             <h4>${escapeHtml(l.customerName)} (${escapeHtml(l.mobile)})</h4>
-            <p>${escapeHtml(l.productName)} • PKR ${formatPKR(l.loanAmount)} • ${escapeHtml(l.officerName || 'RO')} (${escapeHtml(resolveLeadEffectiveBranch(l) || 'Main')})</p>
+            <p>${escapeHtml(l.productName)} • PKR ${formatPKR(l.loanAmount)} • ${escapeHtml(l.officerName || 'RO')} (${escapeHtml(resolveLeadEffectiveBranch(l) || 'Unassigned')})</p>
           </div>
         </label>
         <span class="badge badge-new">${escapeHtml(l.status || 'New')}</span>
@@ -1237,8 +1446,10 @@ async function toggleAdminSelectAllLeads(isChecked) {
 }
 
 async function exportAdminFilteredLeadsCsv() {
-  const list = await getAdminFilteredLeads();
-  downloadLeadsAsCsv(list, `kbl-admin-leads-${new Date().toISOString().slice(0, 10)}.csv`);
+  await withLoading('Preparing Admin CSV...', async () => {
+    const list = await getAdminFilteredLeads();
+    downloadLeadsAsCsv(list, `kbl-admin-leads-${new Date().toISOString().slice(0, 10)}.csv`);
+  });
 }
 
 async function adminDeleteSelectedLeads() {
@@ -1248,30 +1459,36 @@ async function adminDeleteSelectedLeads() {
   }
   const ids = Array.from(adminSelectedLeadIds);
   if (!confirm(`Permanently delete ${ids.length} selected lead(s) from Firestore & local cache?`)) return;
-  for (const id of ids) {
-    await LocalDB.deleteLead(id);
-    if (fb) {
-      try { await fb.deleteDoc('leads', id); } catch (e) {}
+  await withLoading(`Deleting ${ids.length} Lead(s)...`, async () => {
+    for (const id of ids) {
+      await LocalDB.deleteLead(id);
+      if (fb) {
+        try { await fb.deleteDoc('leads', id); } catch (e) {}
+      }
     }
-  }
-  adminSelectedLeadIds.clear();
-  await renderLeads();
-  await renderAdminLeadsDbList();
-  showToast(`🗑️ Deleted ${ids.length} lead(s)`);
+    adminSelectedLeadIds.clear();
+    await renderLeads();
+    await renderAdminLeadsDbList();
+    updateSettingsStats();
+    showToast(`🗑️ Deleted ${ids.length} lead(s)`);
+  });
 }
 
 async function adminDeleteAllLeads() {
   const all = await LocalDB.getAllLeads();
   if (all.length === 0) return;
   if (!confirm(`⚠️ Permanently delete ALL ${all.length} leads from Firestore? This cannot be undone.`)) return;
-  for (const l of all) {
-    await LocalDB.deleteLead(l.id);
-    if (fb) {
-      try { await fb.deleteDoc('leads', l.id); } catch (e) {}
+  await withLoading('Clearing All Leads...', async () => {
+    for (const l of all) {
+      await LocalDB.deleteLead(l.id);
+      if (fb) {
+        try { await fb.deleteDoc('leads', l.id); } catch (e) {}
+      }
     }
-  }
-  adminSelectedLeadIds.clear();
-  await renderLeads();
-  await renderAdminLeadsDbList();
-  showToast('🗑️ All leads cleared.');
+    adminSelectedLeadIds.clear();
+    await renderLeads();
+    await renderAdminLeadsDbList();
+    updateSettingsStats();
+    showToast('🗑️ All leads cleared.');
+  });
 }

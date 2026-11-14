@@ -398,6 +398,13 @@ body {
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
 }
 
+.form-input[readonly] {
+  background-color: var(--surface-subtle);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  font-weight: 700;
+}
+
 .form-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -794,48 +801,160 @@ input:checked + .slider:before {
   color: #99F6E4;
 }
 
-/* Leads KPI Analytics Dashboard */
-.kpi-grid {
+/* Executive Pipeline Dashboard (2x2 Grid + Portfolio Bar + Win Rate Pill) */
+.pipeline-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.winrate-pill {
+  background: #DCFCE7;
+  border: 1px solid #86EFAC;
+  color: #166534;
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 800;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.portfolio-dist-wrap {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.portfolio-bar {
+  width: 100%;
+  height: 8px;
+  border-radius: 6px;
+  background: var(--surface-subtle);
+  overflow: hidden;
+  display: flex;
+}
+
+.pbar-seg {
+  height: 100%;
+  transition: width 0.25s ease;
+}
+
+.pbar-won { background: #10B981; }
+.pbar-active { background: #3B82F6; }
+.pbar-lost { background: #F43F5E; }
+
+.portfolio-legend {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.leg-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.leg-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.kpi-grid-2x2 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-  margin-bottom: 14px;
 }
 
-@media (min-width: 720px) {
-  .kpi-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-}
-
-.kpi-card {
-  background: var(--card-bg);
+.kpi-tile {
+  text-align: left;
+  border-radius: 14px;
+  padding: 11px 12px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 12px 14px;
-  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.kpi-tile:active {
+  transform: scale(0.98);
+}
+
+.kpi-tile-total { background: #F8FAFC; border-color: #CBD5E1; color: #0F172A; }
+.kpi-tile-active { background: #EFF6FF; border-color: #BFDBFE; color: #1E40AF; }
+.kpi-tile-won { background: #ECFDF5; border-color: #A7F3D0; color: #065F46; }
+.kpi-tile-lost { background: #FFF1F2; border-color: #FECDD3; color: #9F1239; }
+
+[data-theme="dark"] .kpi-tile-total { background: #1E293B; border-color: #475569; color: #F8FAFC; }
+[data-theme="dark"] .kpi-tile-active { background: rgba(59, 130, 246, 0.16); border-color: rgba(96, 165, 250, 0.4); color: #93C5FD; }
+[data-theme="dark"] .kpi-tile-won { background: rgba(16, 185, 129, 0.16); border-color: rgba(52, 211, 153, 0.4); color: #6EE7B7; }
+[data-theme="dark"] .kpi-tile-lost { background: rgba(244, 63, 94, 0.16); border-color: rgba(251, 113, 133, 0.4); color: #FDA4AF; }
+
+.kpi-tile-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.kpi-icon {
+  font-size: 0.95rem;
+}
+
+.kpi-tag {
+  font-size: 0.66rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="dark"] .kpi-tag {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .kpi-label {
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  opacity: 0.85;
 }
 
 .kpi-value {
-  font-size: 1.4rem;
+  font-size: 1.35rem;
   font-weight: 900;
-  margin-top: 4px;
-  color: var(--text-main);
-  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.kpi-amount {
+  font-size: 0.98rem;
+  font-weight: 900;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .kpi-sub {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  margin-top: 2px;
+  font-size: 0.68rem;
+  opacity: 0.82;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Folded / Expandable Lead Cards */
@@ -1295,6 +1414,169 @@ input:checked + .slider:before {
 .toast-banner.show {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
+}
+
+/* Global Action Loading Overlay */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 99998;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.loading-overlay.active {
+  display: flex;
+}
+
+.loading-card {
+  background: var(--card-bg);
+  color: var(--text-main);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  box-shadow: var(--shadow-lg);
+  min-width: 210px;
+  text-align: center;
+}
+
+.spinner-ring {
+  width: 34px;
+  height: 34px;
+  border: 3.5px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: kblSpin 0.8s linear infinite;
+}
+
+@keyframes kblSpin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+/* Visual GPS Mini-Map Card (Esri Street Tiles + Pulsing Marker) */
+.gps-map-card {
+  display: block;
+  text-decoration: none;
+  position: relative;
+  width: 100%;
+  height: 140px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1.5px solid #93C5FD;
+  margin: 8px 0 10px;
+  background: #E2E8F0;
+  box-shadow: var(--shadow-sm);
+}
+
+.gps-tile-grid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  pointer-events: none;
+}
+
+.gps-tile-grid img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.gps-map-top-badge {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  right: 7px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.gps-badge-pill {
+  background: rgba(255, 255, 255, 0.94);
+  color: #0F172A;
+  border: 1px solid #BFDBFE;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 74%;
+}
+
+.gps-pin-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -65%);
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gps-pin-pulse {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.35);
+  animation: kblPulse 1.6s ease-out infinite;
+}
+
+@keyframes kblPulse {
+  0% { transform: scale(0.7); opacity: 0.85; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+
+.gps-pin-marker {
+  position: relative;
+  font-size: 1.55rem;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45));
+}
+
+.gps-map-footer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(15, 23, 42, 0.88);
+  color: #F8FAFC;
+  padding: 5px 9px;
+  font-size: 0.7rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.gps-addr-box {
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 0.76rem;
+  margin-bottom: 6px;
+  line-height: 1.4;
 }
 
 /* Progress Bar */

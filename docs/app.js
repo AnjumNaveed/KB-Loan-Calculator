@@ -14,7 +14,10 @@ let unsubscribeProducts = null;
 let unsubscribeLeads = null;
 let unsubscribeGlobalConfig = null;
 let unsubscribeUserDoc = null;
+let unsubscribeUsersCol = null;
 let toastTimer = null;
+let cachedLeadsList = [];
+let activeLoadingCount = 0;
 
 let globalConfig = {
   fedRate: 16.0,
@@ -29,6 +32,7 @@ let globalConfig = {
   appUpdateMessage: '',
   googleSheetsWebhookUrl: '',
   registeredUsersMap: {},
+  liveUsersCollectionMap: {},
   deletedUserKeys: []
 };
 
@@ -258,12 +262,20 @@ class LocalDB {
       const tx = d.transaction('leads', 'readonly');
       const store = tx.objectStore('leads');
       const req = store.getAll();
-      req.onsuccess = () => resolve(req.result || []);
+      req.onsuccess = () => {
+        const res = req.result || [];
+        cachedLeadsList = res;
+        resolve(res);
+      };
       req.onerror = () => resolve([]);
     });
   }
 
   static async saveLead(lead) {
+    const idx = cachedLeadsList.findIndex(x => x.id === lead.id);
+    if (idx >= 0) cachedLeadsList[idx] = lead;
+    else cachedLeadsList.push(lead);
+
     const d = await this.init();
     return new Promise((resolve) => {
       const tx = d.transaction('leads', 'readwrite');
@@ -275,6 +287,8 @@ class LocalDB {
   }
 
   static async deleteLead(leadId) {
+    cachedLeadsList = cachedLeadsList.filter(x => x.id !== leadId);
+
     const d = await this.init();
     return new Promise((resolve) => {
       const tx = d.transaction('leads', 'readwrite');
@@ -314,9 +328,9 @@ let currentEditingLeadId = null;
 let currentFollowUpLeadId = null;
 
 let officerProfile = {
-  officerName: 'Anjum Naveed',
-  staffId: 'RM-8433',
-  branchName: 'Main Branch',
+  officerName: '',
+  staffId: '',
+  branchName: '',
   webhookUrl: ''
 };
 
@@ -397,6 +411,7 @@ function initFirebaseAuthAndFirestore() {
 
       startFirestoreGlobalConfigListener(user);
       startFirestoreUserListener(user);
+      startFirestoreUsersCollectionListener(user);
       await verifyUserAccessAndSyncProfile(user);
       startFirestoreProductsListener();
       startFirestoreLeadsListener();
@@ -422,6 +437,7 @@ function initFirebaseAuthAndFirestore() {
       if (unsubscribeLeads) { unsubscribeLeads(); unsubscribeLeads = null; }
       if (unsubscribeGlobalConfig) { unsubscribeGlobalConfig(); unsubscribeGlobalConfig = null; }
       if (unsubscribeUserDoc) { unsubscribeUserDoc(); unsubscribeUserDoc = null; }
+      if (unsubscribeUsersCol) { unsubscribeUsersCol(); unsubscribeUsersCol = null; }
     }
   });
 }
@@ -447,11 +463,9 @@ function startFirestoreGlobalConfigListener(user) {
       globalConfig.registeredUsersMap = d.registeredUsersMap || {};
       globalConfig.deletedUserKeys = Array.isArray(d.deletedUserKeys) ? d.deletedUserKeys : [];
 
-      if (d.googleSheetsWebhookUrl && !officerProfile.webhookUrl) {
+      if (d.googleSheetsWebhookUrl && officerProfile.webhookUrl !== d.googleSheetsWebhookUrl) {
         officerProfile.webhookUrl = d.googleSheetsWebhookUrl;
         await LocalDB.setSetting('webhookUrl', officerProfile.webhookUrl);
-        const webhookInput = document.getElementById('settingsWebhookUrl');
-        if (webhookInput) webhookInput.value = officerProfile.webhookUrl;
       }
 
       updateAppUpdateBanner();
@@ -481,35 +495,102 @@ function startFirestoreUserListener(user) {
   });
 }
 
-async function verifyUserAccessAndSyncProfile(user) {
+function startFirestoreUsersCollectionListener(user) {
   if (!fb) return;
+  if (unsubscribeUsersCol) unsubscribeUsersCol();
+
+  unsubscribeUsersCol = fb.onCollectionSnapshot('users', async (snapshot) => {
+    const liveMap = {};
+    snapshot.forEach(docSnap => {
+      const u = docSnap.data();
+      if (u && typeof u === 'object') {
+        const uid = u.uid || docSnap.id;
+        liveMap[uid] = { uid, ...u };
+      }
+    });
+    globalConfig.liveUsersCollectionMap = liveMap;
+    if (adminUnlocked) {
+      renderAdminUsersList();
+    }
+    if (user) {
+      await verifyUserAccessAndSyncProfile(user);
+    } else {
+      renderLeads();
+    }
+  }, (err) => {
+    console.warn('Users collection listener notice:', err);
+  });
+}
+
+async function verifyUserAccessAndSyncProfile(user) {
+  if (!fb || !user) return;
 
   try {
     const isPrimaryAdmin = Boolean(
       user.email && (user.email.toLowerCase().includes('vipanjum') || user.email.toLowerCase().includes('admin'))
     );
+    const userEmailLower = (user.email || '').trim().toLowerCase();
+    const localStaffLower = (officerProfile.staffId || '').trim().toLowerCase();
 
     const snap = await fb.getDoc('users', user.uid);
-    let userRecord = snap.exists() ? snap.data() : null;
+    const directUserDoc = snap.exists() ? snap.data() : null;
 
-    let globalRecord = null;
+    let regMap = globalConfig.registeredUsersMap || {};
     try {
       const globalSnap = await fb.getDoc('config', 'global');
       if (globalSnap.exists()) {
         const gData = globalSnap.data();
-        const regMap = gData.registeredUsersMap || {};
+        regMap = gData.registeredUsersMap || {};
         globalConfig.registeredUsersMap = regMap;
-        globalRecord = regMap[user.uid] || Object.values(regMap).find(u =>
-          u && user.email && u.email && u.email.toLowerCase() === user.email.toLowerCase()
-        ) || null;
       }
     } catch (e) {
       console.warn('Global registry read notice:', e);
     }
 
-    let effectiveRecord = userRecord;
-    if (globalRecord && (!effectiveRecord || (Number(globalRecord.updatedAt) || 0) >= (Number(effectiveRecord.updatedAt) || 0))) {
-      effectiveRecord = globalRecord;
+    const candidates = [];
+    const considerRecord = (rec) => {
+      if (!rec || typeof rec !== 'object') return;
+      const rUid = (rec.uid || '').trim();
+      const rEmail = (rec.email || '').trim().toLowerCase();
+      const rStaff = (rec.staffId || '').trim().toLowerCase();
+      const uidMatch = rUid && rUid === user.uid;
+      const emailMatch = userEmailLower && rEmail && rEmail === userEmailLower;
+      const staffMatch = localStaffLower && rStaff && rStaff === localStaffLower && (!rEmail || !userEmailLower || rEmail === userEmailLower);
+      if (uidMatch || emailMatch || staffMatch) {
+        candidates.push(rec);
+      }
+    };
+
+    if (directUserDoc) candidates.push({ uid: user.uid, ...directUserDoc });
+    Object.entries(regMap).forEach(([k, u]) => {
+      if (u && typeof u === 'object') considerRecord({ uid: u.uid || k, ...u });
+    });
+    Object.entries(globalConfig.liveUsersCollectionMap || {}).forEach(([k, u]) => {
+      if (u && typeof u === 'object') considerRecord({ uid: u.uid || k, ...u });
+    });
+
+    candidates.sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0));
+
+    let effectiveRecord = null;
+    if (candidates.length > 0) {
+      effectiveRecord = { uid: user.uid };
+      // Merge freshest non-empty values across matching Android/Web user docs
+      candidates.slice().reverse().forEach(rec => {
+        Object.entries(rec).forEach(([k, v]) => {
+          if (v !== undefined && v !== null && v !== '') {
+            if (k === 'branchName' && String(v).trim().toLowerCase() === 'main branch' && effectiveRecord.branchName) {
+              return;
+            }
+            effectiveRecord[k] = v;
+          }
+        });
+      });
+      // Ensure explicit boolean flags from freshest candidate win
+      const freshest = candidates[0];
+      if (freshest.isBlocked !== undefined) effectiveRecord.isBlocked = freshest.isBlocked;
+      if (freshest.canUseSupervisorFilter !== undefined) effectiveRecord.canUseSupervisorFilter = freshest.canUseSupervisorFilter;
+      if (freshest.role) effectiveRecord.role = freshest.role;
+      if (freshest.allowedSupervisorBranch) effectiveRecord.allowedSupervisorBranch = freshest.allowedSupervisorBranch;
     }
 
     if (effectiveRecord) {
@@ -522,9 +603,18 @@ async function verifyUserAccessAndSyncProfile(user) {
         hideAccessDeniedScreen();
       }
 
-      if (effectiveRecord.officerName) officerProfile.officerName = effectiveRecord.officerName;
-      if (effectiveRecord.staffId) officerProfile.staffId = effectiveRecord.staffId;
-      if (effectiveRecord.branchName) officerProfile.branchName = effectiveRecord.branchName;
+      if (effectiveRecord.officerName && effectiveRecord.officerName.trim()) {
+        officerProfile.officerName = effectiveRecord.officerName.trim();
+        await LocalDB.setSetting('officerName', officerProfile.officerName);
+      }
+      if (effectiveRecord.staffId && effectiveRecord.staffId.trim()) {
+        officerProfile.staffId = effectiveRecord.staffId.trim();
+        await LocalDB.setSetting('staffId', officerProfile.staffId);
+      }
+      if (effectiveRecord.branchName && effectiveRecord.branchName.trim()) {
+        officerProfile.branchName = effectiveRecord.branchName.trim();
+        await LocalDB.setSetting('branchName', officerProfile.branchName);
+      }
 
       const roleEl = document.getElementById('settingsUserRole');
       if (roleEl) {
@@ -534,19 +624,27 @@ async function verifyUserAccessAndSyncProfile(user) {
     } else {
       const defaultRole = isPrimaryAdmin ? 'Admin' : 'Loan Officer';
       const defaultBlocked = !isPrimaryAdmin;
+      const initialBranch = officerProfile.branchName || '';
 
       const newUser = {
         uid: user.uid,
         email: user.email || '',
         officerName: user.displayName || officerProfile.officerName || 'Loan Officer',
         staffId: officerProfile.staffId || ('RO-' + user.uid.substring(0, 4).toUpperCase()),
-        branchName: officerProfile.branchName || 'Main Branch',
-        allowedSupervisorBranch: isPrimaryAdmin ? 'ALL' : (officerProfile.branchName || 'Main Branch'),
+        branchName: initialBranch,
+        allowedSupervisorBranch: isPrimaryAdmin ? 'ALL' : initialBranch,
         canUseSupervisorFilter: isPrimaryAdmin,
         isBlocked: defaultBlocked,
         role: defaultRole,
         updatedAt: Date.now()
       };
+
+      officerProfile.officerName = newUser.officerName;
+      officerProfile.staffId = newUser.staffId;
+      officerProfile.branchName = newUser.branchName;
+      await LocalDB.setSetting('officerName', officerProfile.officerName);
+      await LocalDB.setSetting('staffId', officerProfile.staffId);
+      await LocalDB.setSetting('branchName', officerProfile.branchName);
 
       await fb.setDoc('users', user.uid, newUser, true);
       try {
@@ -565,8 +663,12 @@ async function verifyUserAccessAndSyncProfile(user) {
       }
     }
 
-    document.getElementById('officerBadge').textContent = `👤 Officer: ${officerProfile.officerName} (${officerProfile.staffId})`;
-    document.getElementById('branchBadge').textContent = `🏢 ${officerProfile.branchName}`;
+    const displayName = officerProfile.officerName || user.displayName || 'Officer';
+    const displayStaff = officerProfile.staffId || 'RO';
+    const displayBranch = officerProfile.branchName || 'Unassigned';
+
+    document.getElementById('officerBadge').textContent = `👤 Officer: ${displayName} (${displayStaff})`;
+    document.getElementById('branchBadge').textContent = `🏢 ${displayBranch}`;
     document.getElementById('settingsOfficerName').value = officerProfile.officerName;
     document.getElementById('settingsStaffId').value = officerProfile.staffId;
     document.getElementById('settingsBranch').value = officerProfile.branchName;
@@ -577,7 +679,8 @@ async function verifyUserAccessAndSyncProfile(user) {
       statusEl.style.color = '#16A34A';
     }
 
-    renderLeads();
+    await renderLeads();
+    updateSettingsStats();
   } catch (err) {
     console.warn('Error verifying user access in Firestore:', err);
   }
@@ -787,8 +890,8 @@ function startFirestoreProductsListener() {
       snapshot.forEach(docSnap => {
         const d = docSnap.data();
         const pId = d.id || docSnap.id;
-        const category = d.category || 'asset';
-        const rateType = d.rateType || 'reducing';
+        const category = String(d.category || 'asset').trim().toLowerCase() === 'liability' ? 'liability' : 'asset';
+        const rateType = String(d.rateType || 'reducing').trim().toLowerCase();
         const defaultAnnualRate = Number(d.defaultAnnualRate) || 0.0;
         const minAmount = Number(d.minAmount) || 50000;
         const maxAmount = Number(d.maxAmount) || 5000000;
@@ -796,7 +899,10 @@ function startFirestoreProductsListener() {
         const maxTenure = Number(d.maxTenure) || 36;
         const minAge = Number(d.minAge) || 21;
         const maxAgeAtMaturity = Number(d.maxAgeAtMaturity) || 65;
-        const feePercent = Number(d.defaultFeeValue) ?? Number(d.feePercent) ?? 1.5;
+        const rawFeeVal = (d.defaultFeeValue !== undefined && d.defaultFeeValue !== null)
+          ? Number(d.defaultFeeValue)
+          : ((d.feePercent !== undefined && d.feePercent !== null) ? Number(d.feePercent) : 1.5);
+        const feePercent = isNaN(rawFeeVal) ? 1.5 : rawFeeVal;
         const fedRate = Number(d.fedRate) || globalConfig.fedRate || 16.0;
         const rateSlabs = Array.isArray(d.rateSlabs) ? d.rateSlabs : [];
         const feeSlabs = Array.isArray(d.feeSlabs) ? d.feeSlabs : [];
@@ -897,7 +1003,7 @@ function startFirestoreLeadsListener() {
         followUpDate: d.followUpDate || '',
         officerName: d.officerName || '',
         officerId: d.officerId || '',
-        branchName: d.branchName || 'Main Branch',
+        branchName: d.branchName || '',
         userId: d.userId || '',
         latitude: d.latitude ?? null,
         longitude: d.longitude ?? null,
@@ -964,7 +1070,35 @@ function switchTab(tabId, navElement) {
   }
 }
 
-// 10. GEOLOCATION & PROPOSAL DISPATCH (NON-WRAPPING ACTIONS)
+// 10. GEOLOCATION (WITH OSM NOMINATIM REVERSE GEOCODING) & PROPOSAL DISPATCH
+async function reverseGeocodeAddress(lat, lng, timeoutMs = 3000) {
+  const fallback = `GPS: ${lat}, ${lng}`;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const resp = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&zoom=18&addressdetails=1`,
+      { signal: controller.signal, headers: { 'Accept-Language': 'en' } }
+    );
+    clearTimeout(timer);
+    if (!resp.ok) return fallback;
+    const data = await resp.json();
+    if (data && data.address) {
+      const a = data.address;
+      const parts = [
+        a.road || a.pedestrian || a.neighbourhood || a.suburb,
+        a.city_district || a.town || a.village || a.city || a.county,
+        a.state
+      ].filter(Boolean);
+      if (parts.length > 0) return parts.join(', ');
+    }
+    if (data && data.display_name) {
+      return String(data.display_name).split(',').slice(0, 3).map(s => s.trim()).join(', ');
+    }
+  } catch (e) {}
+  return fallback;
+}
+
 function captureBrowserLocation(timeoutMs = 3500) {
   return new Promise((resolve) => {
     if (!navigator.geolocation) {
@@ -972,13 +1106,14 @@ function captureBrowserLocation(timeoutMs = 3500) {
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
+      async (pos) => {
         const lat = Number(pos.coords.latitude.toFixed(6));
         const lng = Number(pos.coords.longitude.toFixed(6));
+        const addr = await reverseGeocodeAddress(lat, lng, 3000);
         resolve({
           latitude: lat,
           longitude: lng,
-          locationAddress: `GPS: ${lat}, ${lng}`,
+          locationAddress: addr,
           locationCapturedAt: Date.now()
         });
       },
@@ -995,6 +1130,9 @@ function buildCalculatorProposalText() {
   const emiOrProfit = isLiab ? (lastCalculation.netMonthlyProfit || 0) : (lastCalculation.emi || 0);
   const feeOrTax = isLiab ? (lastCalculation.totalTax || 0) : (lastCalculation.totalFee || 0);
   const totalOrMat = isLiab ? (lastCalculation.netMaturity || 0) : (lastCalculation.totalPayable || 0);
+  const offName = officerProfile.officerName || (currentUser && currentUser.displayName) || 'Officer';
+  const offId = officerProfile.staffId || 'RO';
+  const offBranch = officerProfile.branchName || (currentUserProfile && currentUserProfile.branchName) || 'KBL Branch';
 
   return [
     `السلام علیکم جناب *${cust}*،`,
@@ -1016,8 +1154,8 @@ function buildCalculatorProposalText() {
       : `• کل قابل ادائیگی رقم: *PKR ${formatPKR(totalOrMat)}*`,
     ``,
     `مزید معلومات کے لیے رابطہ فرمائیں۔ شکریہ!`,
-    `آفیسر: ${officerProfile.officerName} (${officerProfile.staffId})`,
-    `برانچ: ${officerProfile.branchName}`
+    `آفیسر: ${offName} (${offId})`,
+    `برانچ: ${offBranch}`
   ].join('\n');
 }
 
@@ -1051,9 +1189,14 @@ async function saveLeadFromCalculator(silent = false) {
     return null;
   }
 
-  const ageInfo = calculateDetailedAge(dob);
-  const existingLeads = await LocalDB.getAllLeads();
-  let lead = existingLeads.find(l => l.mobile === mobile || (l.customerName.toLowerCase() === custName.toLowerCase() && l.productName === currentProduct.name));
+  const runSave = async () => {
+    const ageInfo = calculateDetailedAge(dob);
+    const existingLeads = await LocalDB.getAllLeads();
+    let lead = existingLeads.find(l => l.mobile === mobile || (l.customerName.toLowerCase() === custName.toLowerCase() && l.productName === currentProduct.name));
+
+    const effOffName = officerProfile.officerName || (currentUser && currentUser.displayName) || 'Loan Officer';
+    const effOffId = officerProfile.staffId || 'RO';
+    const effBranch = officerProfile.branchName || (currentUserProfile && currentUserProfile.branchName) || '';
 
   const now = Date.now();
   const cleanNote = cleanRawActionPayload(notes);
@@ -1099,8 +1242,8 @@ async function saveLeadFromCalculator(silent = false) {
         actionType: 'note_update',
         title: '📝 Note Added',
         details: cleanNote,
-        officerName: officerProfile.officerName,
-        officerId: officerProfile.staffId
+        officerName: effOffName,
+        officerId: effOffId
       });
     }
     lead.activities.push({
@@ -1109,8 +1252,8 @@ async function saveLeadFromCalculator(silent = false) {
       actionType: 'proposal_update',
       title: '📋 Proposal Saved',
       details: `${currentProduct.name} (PKR ${formatPKR(lastCalculation.amount)}, ${lastCalculation.tenure}M)`,
-      officerName: officerProfile.officerName,
-      officerId: officerProfile.staffId
+      officerName: effOffName,
+      officerId: effOffId
     });
   } else {
     const id = 'kb-lead-' + now + '-' + Math.random().toString(36).substring(2, 7);
@@ -1122,8 +1265,8 @@ async function saveLeadFromCalculator(silent = false) {
         actionType: 'note_update',
         title: '📝 Note Added',
         details: cleanNote,
-        officerName: officerProfile.officerName,
-        officerId: officerProfile.staffId
+        officerName: effOffName,
+        officerId: effOffId
       });
     }
     initialActivities.push({
@@ -1132,8 +1275,8 @@ async function saveLeadFromCalculator(silent = false) {
       actionType: 'created',
       title: isLiab ? '🎯 Deposit Lead Created' : '🎯 Loan Lead Created',
       details: `${currentProduct.name} (PKR ${formatPKR(lastCalculation.amount)}, ${lastCalculation.tenure}M)`,
-      officerName: officerProfile.officerName,
-      officerId: officerProfile.staffId
+      officerName: effOffName,
+      officerId: effOffId
     });
 
     lead = {
@@ -1159,9 +1302,9 @@ async function saveLeadFromCalculator(silent = false) {
       status: 'New',
       followUpDate: '',
       notes: cleanNote,
-      officerName: officerProfile.officerName,
-      officerId: officerProfile.staffId,
-      branchName: officerProfile.branchName,
+      officerName: effOffName,
+      officerId: effOffId,
+      branchName: effBranch,
       userId: currentUser ? currentUser.uid : 'web-officer',
       latitude: loc ? loc.latitude : null,
       longitude: loc ? loc.longitude : null,
@@ -1203,22 +1346,47 @@ async function saveLeadFromCalculator(silent = false) {
   await renderLeads();
   updateSettingsStats();
 
-  if (navigator.onLine && officerProfile.webhookUrl) {
+  if (navigator.onLine && (officerProfile.webhookUrl || globalConfig.googleSheetsWebhookUrl)) {
     syncLeadToSheet(lead);
   }
   return lead;
+  };
+
+  if (silent) {
+    return await runSave();
+  }
+  return await withLoading('Capturing GPS & Saving Lead...', runSave);
 }
 
-// 11. WHATSAPP & SMS QUOTATIONS WITH AUTO-SAVE & APPROACH LOGGING
-async function sendQuotationWhatsApp(leadId = null) {
+// 11. POPUP-FREE WHATSAPP & SMS QUOTATIONS WITH BACKGROUND LEAD SAVE & APPROACH LOGGING
+function openExternalWhatsAppUrl(url) {
+  let opened = null;
+  try {
+    opened = window.open(url, '_blank');
+    if (opened) {
+      try { opened.opener = null; } catch (err) {}
+    }
+  } catch (e) {
+    opened = null;
+  }
+  if (!opened || opened.closed || typeof opened.closed === 'undefined') {
+    window.location.href = url;
+  }
+}
+
+function sendQuotationWhatsApp(leadId = null) {
   let mobile = '';
   let msgText = '';
+  const offName = officerProfile.officerName || (currentUser && currentUser.displayName) || 'Officer';
+  const offBranch = officerProfile.branchName || (currentUserProfile && currentUserProfile.branchName) || 'KBL Branch';
 
   if (leadId) {
-    const leads = await LocalDB.getAllLeads();
-    const lead = leads.find(l => l.id === leadId);
-    if (!lead) return;
-    mobile = lead.mobile;
+    const lead = cachedLeadsList.find(l => l.id === leadId);
+    if (!lead) {
+      showToast('Lead record loading, please try again.');
+      return;
+    }
+    mobile = lead.mobile || '';
     const matchedProd = BANK_PRODUCTS.find(p => p.id === lead.productId || p.name === lead.productName) || currentProduct;
     const rate = getApplicableRate(matchedProd, lead.loanAmount, lead.tenureMonths);
     const totalPayable = (lead.loanAmount || 0) + (lead.totalProfit || 0);
@@ -1235,63 +1403,85 @@ async function sendQuotationWhatsApp(leadId = null) {
       `• فیس / ٹیکس: *PKR ${formatPKR(lead.processingFee)}*`,
       `• کل رقم: *PKR ${formatPKR(totalPayable)}*`,
       ``,
-      `آفیسر: ${officerProfile.officerName} (${officerProfile.branchName})`
+      `آفیسر: ${offName} (${offBranch})`
     ].join('\n');
 
-    await logApproach(leadId, 'whatsapp', '💬 WhatsApp Quotation', `Quotation sent via WhatsApp to ${mobile}`);
-  } else {
-    mobile = document.getElementById('customerMobile').value.trim();
-    const custName = document.getElementById('customerName').value.trim();
-    msgText = buildCalculatorProposalText();
-    if (!msgText) {
-      showToast('Calculate a plan first.');
-      return;
-    }
-    if (custName && mobile) {
-      const saved = await saveLeadFromCalculator(true);
-      if (saved) {
-        await logApproach(saved.id, 'whatsapp', '💬 WhatsApp Quotation', `Proposal shared on WhatsApp (${mobile})`);
-      }
-    }
+    const cleanPhone = formatForWhatsApp(mobile);
+    const url = cleanPhone
+      ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msgText)}`
+      : `https://wa.me/?text=${encodeURIComponent(msgText)}`;
+
+    // Synchronous open during direct user click prevents browser popup blockers
+    openExternalWhatsAppUrl(url);
+
+    // Log approach asynchronously in background
+    logApproach(leadId, 'whatsapp', '💬 WhatsApp Quotation', `Quotation sent via WhatsApp to ${mobile}`).catch(e => console.warn(e));
+    return;
+  }
+
+  mobile = document.getElementById('customerMobile').value.trim();
+  const custName = document.getElementById('customerName').value.trim();
+  msgText = buildCalculatorProposalText();
+  if (!msgText) {
+    showToast('Calculate a plan first.');
+    return;
   }
 
   const cleanPhone = formatForWhatsApp(mobile);
   const url = cleanPhone
     ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msgText)}`
     : `https://wa.me/?text=${encodeURIComponent(msgText)}`;
-  window.open(url, '_blank');
+
+  // Synchronous open during direct user click prevents browser popup blockers
+  openExternalWhatsAppUrl(url);
+
+  // Save lead and log approach asynchronously in background
+  if (custName && mobile) {
+    saveLeadFromCalculator(true).then(saved => {
+      if (saved) {
+        return logApproach(saved.id, 'whatsapp', '💬 WhatsApp Quotation', `Proposal shared on WhatsApp (${mobile})`);
+      }
+    }).catch(e => console.warn('Background WhatsApp lead save warning:', e));
+  }
 }
 
-async function sendQuotationSMS(leadId = null) {
+function sendQuotationSMS(leadId = null) {
   let mobile = '';
   let smsBody = '';
+  const offName = officerProfile.officerName || (currentUser && currentUser.displayName) || 'Officer';
+  const offBranch = officerProfile.branchName || (currentUserProfile && currentUserProfile.branchName) || 'KBL Branch';
 
   if (leadId) {
-    const leads = await LocalDB.getAllLeads();
-    const lead = leads.find(l => l.id === leadId);
+    const lead = cachedLeadsList.find(l => l.id === leadId);
     if (!lead) return;
-    mobile = lead.mobile;
-    smsBody = `Dear ${lead.customerName}, KBL Quotation: ${lead.productName}, Amount: PKR ${formatPKR(lead.loanAmount)}, Tenure: ${lead.tenureMonths}M, Monthly: PKR ${formatPKR(lead.monthlyEmi)}. Contact: ${officerProfile.officerName} (${officerProfile.branchName})`;
-    await logApproach(leadId, 'sms', '✉️ SMS Quotation', `SMS quotation sent to ${mobile}`);
-  } else {
-    const custName = document.getElementById('customerName').value.trim() || 'Customer';
-    mobile = document.getElementById('customerMobile').value.trim();
-    if (!lastCalculation || lastCalculation.amount <= 0) {
-      showToast('Calculate a plan first.');
-      return;
-    }
-    if (document.getElementById('customerName').value.trim() && mobile) {
-      const saved = await saveLeadFromCalculator(true);
-      if (saved) {
-        await logApproach(saved.id, 'sms', '✉️ SMS Quotation', `SMS quotation sent (${mobile})`);
-      }
-    }
-    const emiVal = lastCalculation.emi || lastCalculation.netMonthlyProfit || 0;
-    smsBody = `Dear ${custName}, KBL Quotation: ${currentProduct.name}, Amount: PKR ${formatPKR(lastCalculation.amount)}, Tenure: ${lastCalculation.tenure}M, Monthly: PKR ${formatPKR(emiVal)}. Contact: ${officerProfile.officerName} (${officerProfile.branchName})`;
+    mobile = lead.mobile || '';
+    smsBody = `Dear ${lead.customerName}, KBL Quotation: ${lead.productName}, Amount: PKR ${formatPKR(lead.loanAmount)}, Tenure: ${lead.tenureMonths}M, Monthly: PKR ${formatPKR(lead.monthlyEmi)}. Contact: ${offName} (${offBranch})`;
+
+    const cleanPhone = mobile.replace(/\D/g, '');
+    window.location.href = `sms:${cleanPhone}?body=${encodeURIComponent(smsBody)}`;
+    logApproach(leadId, 'sms', '✉️ SMS Quotation', `SMS quotation sent to ${mobile}`).catch(e => console.warn(e));
+    return;
   }
+
+  const custName = document.getElementById('customerName').value.trim() || 'Customer';
+  mobile = document.getElementById('customerMobile').value.trim();
+  if (!lastCalculation || lastCalculation.amount <= 0) {
+    showToast('Calculate a plan first.');
+    return;
+  }
+  const emiVal = lastCalculation.emi || lastCalculation.netMonthlyProfit || 0;
+  smsBody = `Dear ${custName}, KBL Quotation: ${currentProduct.name}, Amount: PKR ${formatPKR(lastCalculation.amount)}, Tenure: ${lastCalculation.tenure}M, Monthly: PKR ${formatPKR(emiVal)}. Contact: ${offName} (${offBranch})`;
 
   const cleanPhone = mobile.replace(/\D/g, '');
   window.location.href = `sms:${cleanPhone}?body=${encodeURIComponent(smsBody)}`;
+
+  if (document.getElementById('customerName').value.trim() && mobile) {
+    saveLeadFromCalculator(true).then(saved => {
+      if (saved) {
+        return logApproach(saved.id, 'sms', '✉️ SMS Quotation', `SMS quotation sent (${mobile})`);
+      }
+    }).catch(e => console.warn('Background SMS lead save warning:', e));
+  }
 }
 
 async function initiateCall(leadId, mobile) {
@@ -1340,7 +1530,7 @@ async function logApproach(leadId, type, title, detail) {
   if (navigator.onLine && officerProfile.webhookUrl) syncLeadToSheet(lead);
 }
 
-// 12. LEAD STATUS, NOTE, FOLLOW-UP & DELETE ACTIONS
+// 12. LEAD STATUS, NOTE & FOLLOW-UP ACTIONS
 async function updateLeadStatus(leadId, newStatus) {
   const leads = await LocalDB.getAllLeads();
   const lead = leads.find(l => l.id === leadId);
@@ -1349,58 +1539,44 @@ async function updateLeadStatus(leadId, newStatus) {
   const oldStatus = lead.status || 'New';
   if (oldStatus === newStatus) return;
 
-  const now = Date.now();
-  lead.status = newStatus;
-  lead.syncStatus = 'pending_sync';
-  if (!lead.activities) lead.activities = [];
+  await withLoading(`Updating status to ${newStatus}...`, async () => {
+    const now = Date.now();
+    lead.status = newStatus;
+    lead.syncStatus = 'pending_sync';
+    if (!lead.activities) lead.activities = [];
 
-  lead.activities.push({
-    id: 'stat-' + now,
-    timestamp: now,
-    actionType: 'status_change',
-    title: '🔄 Status Changed',
-    details: `${oldStatus} ➔ ${newStatus}`,
-    officerName: officerProfile.officerName,
-    officerId: officerProfile.staffId
+    lead.activities.push({
+      id: 'stat-' + now,
+      timestamp: now,
+      actionType: 'status_change',
+      title: '🔄 Status Changed',
+      details: `${oldStatus} ➔ ${newStatus}`,
+      officerName: officerProfile.officerName || 'Officer',
+      officerId: officerProfile.staffId || 'RO'
+    });
+
+    await LocalDB.saveLead(lead);
+
+    if (fb) {
+      try {
+        await fb.setDoc('leads', lead.id, {
+          status: newStatus,
+          activities: lead.activities,
+          syncStatus: 'synced',
+          updatedAtMs: Date.now(),
+          updatedAt: fb.serverTimestamp()
+        }, true);
+        lead.syncStatus = 'synced';
+        await LocalDB.saveLead(lead);
+      } catch (e) {
+        console.warn('Firestore status sync notice:', e);
+      }
+    }
+
+    await renderLeads();
+    showToast(`✅ Status updated to ${newStatus}`);
+    if (navigator.onLine && (officerProfile.webhookUrl || globalConfig.googleSheetsWebhookUrl)) syncLeadToSheet(lead);
   });
-
-  await LocalDB.saveLead(lead);
-
-  if (fb) {
-    try {
-      await fb.setDoc('leads', lead.id, {
-        status: newStatus,
-        activities: lead.activities,
-        syncStatus: 'synced',
-        updatedAtMs: Date.now(),
-        updatedAt: fb.serverTimestamp()
-      }, true);
-      lead.syncStatus = 'synced';
-      await LocalDB.saveLead(lead);
-    } catch (e) {
-      console.warn('Firestore status sync notice:', e);
-    }
-  }
-
-  renderLeads();
-  showToast(`✅ Status updated to ${newStatus}`);
-  if (navigator.onLine && officerProfile.webhookUrl) syncLeadToSheet(lead);
-}
-
-async function deleteLead(leadId) {
-  if (!confirm('Are you sure you want to delete this lead?')) return;
-
-  await LocalDB.deleteLead(leadId);
-  if (fb) {
-    try {
-      await fb.deleteDoc('leads', leadId);
-    } catch (e) {
-      console.warn('Firestore delete notice:', e);
-    }
-  }
-  await renderLeads();
-  updateSettingsStats();
-  showToast('🗑️ Lead deleted.');
 }
 
 async function openTrackRecord(leadId) {
@@ -1456,44 +1632,46 @@ async function confirmSaveNote() {
 
   const noteText = document.getElementById('editNoteTextarea').value.trim();
   const cleanNote = cleanRawActionPayload(noteText);
-  const now = Date.now();
 
-  lead.notes = cleanNote;
-  lead.notesUpdateCount = (lead.notesUpdateCount || 0) + 1;
-  lead.syncStatus = 'pending_sync';
-  if (!lead.activities) lead.activities = [];
+  await withLoading('Saving Lead Note...', async () => {
+    const now = Date.now();
+    lead.notes = cleanNote;
+    lead.notesUpdateCount = (lead.notesUpdateCount || 0) + 1;
+    lead.syncStatus = 'pending_sync';
+    if (!lead.activities) lead.activities = [];
 
-  lead.activities.push({
-    id: 'act-' + now,
-    timestamp: now,
-    actionType: 'note_update',
-    title: '📝 Note / Comment Updated',
-    details: cleanNote || 'Cleared note',
-    officerName: officerProfile.officerName,
-    officerId: officerProfile.staffId
-  });
+    lead.activities.push({
+      id: 'act-' + now,
+      timestamp: now,
+      actionType: 'note_update',
+      title: '📝 Note / Comment Updated',
+      details: cleanNote || 'Cleared note',
+      officerName: officerProfile.officerName || 'Officer',
+      officerId: officerProfile.staffId || 'RO'
+    });
 
-  await LocalDB.saveLead(lead);
+    await LocalDB.saveLead(lead);
 
-  if (fb) {
-    try {
-      await fb.setDoc('leads', lead.id, {
-        ...lead,
-        syncStatus: 'synced',
-        updatedAtMs: Date.now(),
-        updatedAt: fb.serverTimestamp()
-      }, true);
-      lead.syncStatus = 'synced';
-      await LocalDB.saveLead(lead);
-    } catch (e) {
-      console.warn('Firestore note sync notice:', e);
+    if (fb) {
+      try {
+        await fb.setDoc('leads', lead.id, {
+          ...lead,
+          syncStatus: 'synced',
+          updatedAtMs: Date.now(),
+          updatedAt: fb.serverTimestamp()
+        }, true);
+        lead.syncStatus = 'synced';
+        await LocalDB.saveLead(lead);
+      } catch (e) {
+        console.warn('Firestore note sync notice:', e);
+      }
     }
-  }
 
-  closeModal('editNoteModal');
-  renderLeads();
-  showToast('✅ Note updated & synced!');
-  if (navigator.onLine && officerProfile.webhookUrl) syncLeadToSheet(lead);
+    closeModal('editNoteModal');
+    await renderLeads();
+    showToast('✅ Note updated & synced!');
+    if (navigator.onLine && (officerProfile.webhookUrl || globalConfig.googleSheetsWebhookUrl)) syncLeadToSheet(lead);
+  });
 }
 
 async function openFollowUpModal(leadId) {
@@ -1517,43 +1695,45 @@ async function confirmScheduleFollowUp() {
   const lead = leads.find(l => l.id === currentFollowUpLeadId);
   if (!lead) return;
 
-  const now = Date.now();
-  lead.followUpDate = dt.replace('T', ' ');
-  lead.status = 'Follow-Up';
-  lead.syncStatus = 'pending_sync';
-  if (!lead.activities) lead.activities = [];
+  await withLoading('Scheduling Follow-Up...', async () => {
+    const now = Date.now();
+    lead.followUpDate = dt.replace('T', ' ');
+    lead.status = 'Follow-Up';
+    lead.syncStatus = 'pending_sync';
+    if (!lead.activities) lead.activities = [];
 
-  lead.activities.push({
-    id: 'act-' + now,
-    timestamp: now,
-    actionType: 'follow_up',
-    title: '📅 Follow-Up Scheduled',
-    details: `Scheduled follow-up for ${lead.followUpDate}`,
-    officerName: officerProfile.officerName,
-    officerId: officerProfile.staffId
-  });
+    lead.activities.push({
+      id: 'act-' + now,
+      timestamp: now,
+      actionType: 'follow_up',
+      title: '📅 Follow-Up Scheduled',
+      details: `Scheduled follow-up for ${lead.followUpDate}`,
+      officerName: officerProfile.officerName || 'Officer',
+      officerId: officerProfile.staffId || 'RO'
+    });
 
-  await LocalDB.saveLead(lead);
+    await LocalDB.saveLead(lead);
 
-  if (fb) {
-    try {
-      await fb.setDoc('leads', lead.id, {
-        ...lead,
-        syncStatus: 'synced',
-        updatedAtMs: Date.now(),
-        updatedAt: fb.serverTimestamp()
-      }, true);
-      lead.syncStatus = 'synced';
-      await LocalDB.saveLead(lead);
-    } catch (e) {
-      console.warn('Firestore follow-up sync notice:', e);
+    if (fb) {
+      try {
+        await fb.setDoc('leads', lead.id, {
+          ...lead,
+          syncStatus: 'synced',
+          updatedAtMs: Date.now(),
+          updatedAt: fb.serverTimestamp()
+        }, true);
+        lead.syncStatus = 'synced';
+        await LocalDB.saveLead(lead);
+      } catch (e) {
+        console.warn('Firestore follow-up sync notice:', e);
+      }
     }
-  }
 
-  closeModal('followUpModal');
-  renderLeads();
-  showToast('📅 Follow-Up scheduled!');
-  if (navigator.onLine && officerProfile.webhookUrl) syncLeadToSheet(lead);
+    closeModal('followUpModal');
+    await renderLeads();
+    showToast('📅 Follow-Up scheduled!');
+    if (navigator.onLine && (officerProfile.webhookUrl || globalConfig.googleSheetsWebhookUrl)) syncLeadToSheet(lead);
+  });
 }
 
 async function confirmClearFollowUp() {
@@ -1562,27 +1742,29 @@ async function confirmClearFollowUp() {
   const lead = leads.find(l => l.id === currentFollowUpLeadId);
   if (!lead) return;
 
-  lead.followUpDate = '';
-  lead.syncStatus = 'pending_sync';
-  await LocalDB.saveLead(lead);
+  await withLoading('Clearing Follow-Up...', async () => {
+    lead.followUpDate = '';
+    lead.syncStatus = 'pending_sync';
+    await LocalDB.saveLead(lead);
 
-  if (fb) {
-    try {
-      await fb.setDoc('leads', lead.id, {
-        ...lead,
-        syncStatus: 'synced',
-        updatedAtMs: Date.now(),
-        updatedAt: fb.serverTimestamp()
-      }, true);
-      lead.syncStatus = 'synced';
-      await LocalDB.saveLead(lead);
-    } catch (e) {}
-  }
+    if (fb) {
+      try {
+        await fb.setDoc('leads', lead.id, {
+          ...lead,
+          syncStatus: 'synced',
+          updatedAtMs: Date.now(),
+          updatedAt: fb.serverTimestamp()
+        }, true);
+        lead.syncStatus = 'synced';
+        await LocalDB.saveLead(lead);
+      } catch (e) {}
+    }
 
-  closeModal('followUpModal');
-  renderLeads();
-  showToast('Cleared follow-up date.');
-  if (navigator.onLine && officerProfile.webhookUrl) syncLeadToSheet(lead);
+    closeModal('followUpModal');
+    await renderLeads();
+    showToast('Cleared follow-up date.');
+    if (navigator.onLine && (officerProfile.webhookUrl || globalConfig.googleSheetsWebhookUrl)) syncLeadToSheet(lead);
+  });
 }
 
 // 13. GOOGLE SHEETS IN-PLACE SYNC (DUAL-KEY UPSERT ENGINE)
@@ -1655,37 +1837,45 @@ async function manualSync(silent = false) {
     return;
   }
 
-  if (fb && currentUser) {
-    try {
-      const snap = await fb.getDocs('leads');
-      snap.forEach(docSnap => {
-        const d = docSnap.data();
-        LocalDB.saveLead({ id: d.id || docSnap.id, ...d, syncStatus: 'synced' });
-      });
-    } catch (e) {
-      console.warn('Firestore manual sync notice:', e);
+  const runSync = async () => {
+    if (fb && currentUser) {
+      try {
+        const snap = await fb.getDocs('leads');
+        snap.forEach(docSnap => {
+          const d = docSnap.data();
+          LocalDB.saveLead({ id: d.id || docSnap.id, ...d, syncStatus: 'synced' });
+        });
+      } catch (e) {
+        console.warn('Firestore manual sync notice:', e);
+      }
     }
-  }
 
-  const webhook = officerProfile.webhookUrl || globalConfig.googleSheetsWebhookUrl;
-  if (webhook) {
-    const leads = await LocalDB.getAllLeads();
-    const pending = leads.filter(l => l.syncStatus !== 'synced');
-    for (const l of pending) {
-      await syncLeadToSheet(l);
+    const webhook = officerProfile.webhookUrl || globalConfig.googleSheetsWebhookUrl;
+    if (webhook) {
+      const leads = await LocalDB.getAllLeads();
+      const pending = leads.filter(l => l.syncStatus !== 'synced');
+      for (const l of pending) {
+        await syncLeadToSheet(l);
+      }
     }
-  }
 
-  await renderLeads();
-  updateSettingsStats();
-  if (!silent) showToast('✅ Synced with Firestore & Google Sheets!');
+    await renderLeads();
+    await updateSettingsStats();
+    if (!silent) showToast('✅ Synced with Firestore & Google Sheets!');
+  };
+
+  if (silent) {
+    await runSync();
+  } else {
+    await withLoading('Syncing with Firestore & Sheets...', runSync);
+  }
 }
 
 // 14. SETTINGS & PROFILE MANAGEMENT
 async function loadSettings() {
-  officerProfile.officerName = await LocalDB.getSetting('officerName', 'Anjum Naveed');
-  officerProfile.staffId = await LocalDB.getSetting('staffId', 'RM-8433');
-  officerProfile.branchName = await LocalDB.getSetting('branchName', 'Main Branch');
+  officerProfile.officerName = await LocalDB.getSetting('officerName', '');
+  officerProfile.staffId = await LocalDB.getSetting('staffId', '');
+  officerProfile.branchName = await LocalDB.getSetting('branchName', '');
   officerProfile.webhookUrl = await LocalDB.getSetting('webhookUrl', '');
 
   if (!officerProfile.webhookUrl && fb) {
@@ -1701,95 +1891,138 @@ async function loadSettings() {
   document.getElementById('settingsOfficerName').value = officerProfile.officerName;
   document.getElementById('settingsStaffId').value = officerProfile.staffId;
   document.getElementById('settingsBranch').value = officerProfile.branchName;
-  document.getElementById('settingsWebhookUrl').value = officerProfile.webhookUrl;
 
-  document.getElementById('officerBadge').textContent = `👤 Officer: ${officerProfile.officerName} (${officerProfile.staffId})`;
-  document.getElementById('branchBadge').textContent = `🏢 ${officerProfile.branchName}`;
+  document.getElementById('officerBadge').textContent = officerProfile.officerName
+    ? `👤 Officer: ${officerProfile.officerName} (${officerProfile.staffId || 'RO'})`
+    : '👤 Officer: Sign In Required';
+  document.getElementById('branchBadge').textContent = officerProfile.branchName
+    ? `🏢 ${officerProfile.branchName}`
+    : '🏢 Cloud Synced';
 }
 
 async function saveSettings() {
-  officerProfile.officerName = document.getElementById('settingsOfficerName').value.trim() || 'Loan Officer';
-  officerProfile.staffId = document.getElementById('settingsStaffId').value.trim() || 'RO-001';
-  officerProfile.branchName = document.getElementById('settingsBranch').value.trim() || 'Main Branch';
-  officerProfile.webhookUrl = document.getElementById('settingsWebhookUrl').value.trim();
+  await withLoading('Saving Profile to Cloud...', async () => {
+    officerProfile.officerName = document.getElementById('settingsOfficerName').value.trim() || 'Loan Officer';
+    officerProfile.staffId = document.getElementById('settingsStaffId').value.trim() || 'RO-001';
+    // Branch is Cloud-locked (Admin-controlled): preserve synced Cloud branchName
+    const lockedBranch = (currentUserProfile && currentUserProfile.branchName) || officerProfile.branchName || '';
+    officerProfile.branchName = lockedBranch;
 
-  await LocalDB.setSetting('officerName', officerProfile.officerName);
-  await LocalDB.setSetting('staffId', officerProfile.staffId);
-  await LocalDB.setSetting('branchName', officerProfile.branchName);
-  await LocalDB.setSetting('webhookUrl', officerProfile.webhookUrl);
+    await LocalDB.setSetting('officerName', officerProfile.officerName);
+    await LocalDB.setSetting('staffId', officerProfile.staffId);
+    await LocalDB.setSetting('branchName', officerProfile.branchName);
 
-  if (fb && currentUser) {
-    try {
-      const userData = {
-        uid: currentUser.uid,
-        email: currentUser.email || '',
-        officerName: officerProfile.officerName,
-        staffId: officerProfile.staffId,
-        branchName: officerProfile.branchName,
-        updatedAt: Date.now()
-      };
-      await fb.setDoc('users', currentUser.uid, userData, true);
-      await fb.setDoc('config', 'global', {
-        registeredUsersMap: { [currentUser.uid]: userData }
-      }, true);
-    } catch (e) {
-      console.warn('Firestore profile sync error:', e);
+    if (fb && currentUser) {
+      try {
+        const userData = {
+          uid: currentUser.uid,
+          email: currentUser.email || '',
+          officerName: officerProfile.officerName,
+          staffId: officerProfile.staffId,
+          branchName: officerProfile.branchName,
+          updatedAt: Date.now()
+        };
+        await fb.setDoc('users', currentUser.uid, userData, true);
+        await fb.setDoc('config', 'global', {
+          registeredUsersMap: { [currentUser.uid]: userData }
+        }, true);
+      } catch (e) {
+        console.warn('Firestore profile sync error:', e);
+      }
     }
-  }
 
-  document.getElementById('officerBadge').textContent = `👤 Officer: ${officerProfile.officerName} (${officerProfile.staffId})`;
-  document.getElementById('branchBadge').textContent = `🏢 ${officerProfile.branchName}`;
-  renderLeads();
-  showToast('✅ Profile saved and synced!');
+    document.getElementById('settingsBranch').value = officerProfile.branchName;
+    document.getElementById('officerBadge').textContent = `👤 Officer: ${officerProfile.officerName} (${officerProfile.staffId})`;
+    document.getElementById('branchBadge').textContent = `🏢 ${officerProfile.branchName || 'Unassigned'}`;
+    await renderLeads();
+    await updateSettingsStats();
+    showToast('✅ Profile saved and synced!');
+  });
 }
 
 async function testConnection(customUrl = null) {
-  const url = (customUrl !== null ? customUrl : document.getElementById('settingsWebhookUrl').value).trim();
+  const url = String(customUrl !== null ? customUrl : (globalConfig.googleSheetsWebhookUrl || officerProfile.webhookUrl || '')).trim();
   if (!url) {
-    showToast('Please enter Webhook URL first.');
+    showToast('Please enter Webhook URL in Admin Panel first.');
     return;
   }
-  try {
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'ping' }),
-      mode: 'cors'
-    });
-    if (resp.ok) {
-      showToast('✅ Connected successfully to Google Sheets Web App!');
-    } else {
-      showToast('HTTP Response ' + resp.status + ' from endpoint.');
+  await withLoading('Testing Google Sheets Webhook...', async () => {
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'ping' }),
+        mode: 'cors'
+      });
+      if (resp.ok) {
+        showToast('✅ Connected successfully to Google Sheets Web App!');
+      } else {
+        showToast('HTTP Response ' + resp.status + ' from endpoint.');
+      }
+    } catch (err) {
+      showToast('Connection note: ' + err.message);
     }
-  } catch (err) {
-    showToast('Connection note: ' + err.message);
-  }
+  });
 }
 
 async function updateSettingsStats() {
   const leads = await LocalDB.getAllLeads();
+  const myLeads = leads.filter(isLeadOwnedByCurrentOfficer);
   const totEl = document.getElementById('statTotalLeads');
   const pendEl = document.getElementById('statPendingSync');
-  if (totEl) totEl.textContent = leads.length;
-  if (pendEl) pendEl.textContent = leads.filter(l => l.syncStatus !== 'synced').length;
+  if (totEl) totEl.textContent = myLeads.length;
+  if (pendEl) pendEl.textContent = myLeads.filter(l => l.syncStatus !== 'synced').length;
 }
 
 async function exportLeadsJson() {
-  const leads = await LocalDB.getAllLeads();
-  const blob = new Blob([JSON.stringify(leads, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `kb-leads-backup-${new Date().toISOString().slice(0, 10)}.json`;
-  a.click();
-  showToast('📥 Leads JSON backup downloaded');
+  await withLoading('Preparing Personal Backup...', async () => {
+    const leads = await LocalDB.getAllLeads();
+    const myLeads = leads.filter(isLeadOwnedByCurrentOfficer);
+    if (myLeads.length === 0) {
+      showToast('No personal leads found in your offline cache.');
+      return;
+    }
+    const blob = new Blob([JSON.stringify(myLeads, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `kbl-my-leads-${officerProfile.staffId || 'backup'}-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(`📥 Backed up ${myLeads.length} personal lead(s)`);
+  });
 }
 
 function showInstallHelp() {
   openModal('installGuideModal');
 }
 
-// 15. MODALS, TOASTS & FORMATTING HELPERS
+// 15. MODALS, LOADING OVERLAY, TOASTS & FORMATTING HELPERS
+function showLoading(message = 'Processing...') {
+  activeLoadingCount++;
+  const ov = document.getElementById('globalLoadingOverlay');
+  const txt = document.getElementById('globalLoadingText');
+  if (txt) txt.textContent = message;
+  if (ov) ov.classList.add('active');
+}
+
+function hideLoading() {
+  activeLoadingCount = Math.max(0, activeLoadingCount - 1);
+  if (activeLoadingCount === 0) {
+    const ov = document.getElementById('globalLoadingOverlay');
+    if (ov) ov.classList.remove('active');
+  }
+}
+
+async function withLoading(message, asyncFn) {
+  showLoading(message);
+  try {
+    return await asyncFn();
+  } finally {
+    hideLoading();
+  }
+}
+
 function openModal(id) {
   const el = document.getElementById(id);
   if (el) el.classList.add('open');

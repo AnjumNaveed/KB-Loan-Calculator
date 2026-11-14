@@ -1,5 +1,5 @@
 // Service Worker for KB Loan Calculator PWA
-const CACHE_NAME = 'kb-calc-pwa-v5';
+const CACHE_NAME = 'kb-calc-pwa-v6';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',

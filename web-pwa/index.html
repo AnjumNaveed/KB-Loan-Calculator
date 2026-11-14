@@ -21,6 +21,14 @@
   <!-- Toast Feedback -->
   <div id="toastBanner" class="toast-banner"></div>
 
+  <!-- Global Action Loading Overlay -->
+  <div id="globalLoadingOverlay" class="loading-overlay" aria-live="polite" aria-busy="true">
+    <div class="loading-card">
+      <div class="spinner-ring"></div>
+      <div id="globalLoadingText" class="loading-text">Processing...</div>
+    </div>
+  </div>
+
   <!-- ACCESS RESTRICTED SCREEN (BLOCKED USER GATE) -->
   <div class="access-denied-screen" id="accessDeniedScreen">
     <div class="access-card">
@@ -80,16 +88,10 @@
       </div>
 
       <div class="officer-subbar">
-        <span id="officerBadge">👤 Officer: Anjum Naveed (RM-8433)</span>
-        <span id="branchBadge">🏢 Main Branch</span>
+        <span id="officerBadge">👤 Officer: Sign In Required</span>
+        <span id="branchBadge">🏢 Cloud Synced</span>
       </div>
     </header>
-
-    <!-- Force Update Banner (if Admin published update link) -->
-    <div class="app-update-banner" id="appUpdateBanner">
-      <span id="appUpdateBannerText">📲 New update available</span>
-      <a id="appUpdateBannerLink" href="#" target="_blank" rel="noopener" class="btn btn-primary btn-sm" style="width: auto; text-decoration: none;">Open Update</a>
-    </div>
 
     <!-- iOS / Android Home Screen Install Banner -->
     <div class="install-banner" id="pwaBanner">
@@ -97,7 +99,7 @@
       <button type="button" onclick="showInstallHelp()">How to Add</button>
     </div>
 
-    <!-- Navigation Tabs -->
+    <!-- Navigation Tabs (1. Calculator, 2. Leads, 3. Profile, 4. Admin & Slabs) -->
     <nav class="tab-nav">
       <div class="nav-item active" data-tab="calcTab" onclick="switchTab('calcTab', this)">
         <span>📊</span> Calculator
@@ -105,11 +107,11 @@
       <div class="nav-item" data-tab="leadsTab" onclick="switchTab('leadsTab', this)">
         <span>👥</span> Leads (<span id="leadsCount">0</span>)
       </div>
-      <div class="nav-item" data-tab="adminTab" onclick="switchTab('adminTab', this)">
-        <span id="adminNavIcon">🔒</span> Admin &amp; Slabs
-      </div>
       <div class="nav-item" data-tab="settingsTab" onclick="switchTab('settingsTab', this)">
         <span>⚙️</span> Profile
+      </div>
+      <div class="nav-item" data-tab="adminTab" onclick="switchTab('adminTab', this)">
+        <span id="adminNavIcon">🔒</span> Admin &amp; Slabs
       </div>
     </nav>
 
@@ -194,8 +196,8 @@
                 <label class="form-label" id="amountLabel" for="loanAmount" style="margin-bottom: 0;">Desired Loan Amount (PKR)</label>
                 <button type="button" class="btn btn-outline btn-sm" style="width: auto; min-height: 26px; height: 26px; font-size: 0.7rem; padding: 0 8px;" onclick="clearDesiredAmount()">Clear (Auto-Max)</button>
               </div>
-              <input type="number" class="form-input" id="loanAmount" value="" placeholder="Leave BLANK to auto-build max plans up to tenure" oninput="calculate()">
-              <div id="desiredAmountHint" style="font-size: 0.74rem; color: var(--accent); font-weight: 700; margin-top: 4px;"></div>
+              <input type="number" class="form-input" id="loanAmount" value="" placeholder="Blank = Auto-Max from DBR" oninput="calculate()">
+              <div id="desiredAmountHint" style="font-size: 0.74rem; color: var(--accent); font-weight: 700; margin-top: 4px; line-height: 1.35;"></div>
             </div>
 
             <!-- Quick Tenure Selector for Quick Quote Preview -->
@@ -357,75 +359,119 @@
     <!-- TAB 2: LEADS DASHBOARD & SUPERVISOR MONITORING CRM         -->
     <!-- ========================================================== -->
     <section class="tab-content" id="leadsTab">
-      <!-- Executive Analytics KPI Dashboard -->
-      <div class="kpi-grid">
-        <div class="kpi-card" style="border-left: 4px solid #16A34A;">
-          <div class="kpi-label">Win Rate</div>
-          <div class="kpi-value" id="kpiWinRate" style="color: #16A34A;">0%</div>
-          <div class="kpi-sub">Converted vs Total</div>
+      <!-- Executive Pipeline Analytics Dashboard (Android Parity) -->
+      <div class="card pipeline-dashboard-card" style="margin-bottom: 14px;">
+        <div class="pipeline-header-row">
+          <div style="min-width: 0; flex: 1;">
+            <div style="font-size: 0.96rem; font-weight: 900; color: var(--primary);">📊 Pipeline Dashboard &amp; Metrics</div>
+            <div id="kpiScopeSubtitle" style="font-size: 0.74rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Personal Portfolio</div>
+          </div>
+          <div class="winrate-pill" id="kpiWinRatePill">🎯 0% Win Rate</div>
         </div>
-        <div class="kpi-card" style="border-left: 4px solid var(--primary);">
-          <div class="kpi-label">Total Leads</div>
-          <div class="kpi-value" id="kpiTotalLeads">0</div>
-          <div class="kpi-sub">Authorized Scope</div>
+
+        <!-- Portfolio Distribution Bar -->
+        <div class="portfolio-dist-wrap">
+          <div style="display: flex; justify-content: space-between; font-size: 0.68rem; font-weight: 800; color: var(--text-muted); margin-bottom: 4px;">
+            <span>PORTFOLIO DISTRIBUTION</span>
+            <span id="kpiPortfolioCountLabel">0 Leads Logged</span>
+          </div>
+          <div class="portfolio-bar">
+            <div class="pbar-seg pbar-won" id="pbarWon" style="width: 0%;"></div>
+            <div class="pbar-seg pbar-active" id="pbarActive" style="width: 0%;"></div>
+            <div class="pbar-seg pbar-lost" id="pbarLost" style="width: 0%;"></div>
+          </div>
+          <div class="portfolio-legend">
+            <span class="leg-item"><span class="leg-dot" style="background: #10B981;"></span> <span id="legWonText">Won: 0 (0%)</span></span>
+            <span class="leg-item"><span class="leg-dot" style="background: #3B82F6;"></span> <span id="legActiveText">Active: 0 (0%)</span></span>
+            <span class="leg-item"><span class="leg-dot" style="background: #F43F5E;"></span> <span id="legLostText">Lost: 0 (0%)</span></span>
+          </div>
         </div>
-        <div class="kpi-card" style="border-left: 4px solid #D97706;">
-          <div class="kpi-label">Active Pipeline</div>
-          <div class="kpi-value" id="kpiActivePipeline" style="color: #D97706;">0</div>
-          <div class="kpi-sub">New / Contact / F-Up</div>
-        </div>
-        <div class="kpi-card" style="border-left: 4px solid #7E22CE;">
-          <div class="kpi-label">Converted (Won)</div>
-          <div class="kpi-value" id="kpiConverted" style="color: #7E22CE;">0</div>
-          <div class="kpi-sub">Disbursed / Opened</div>
-        </div>
-        <div class="kpi-card" style="border-left: 4px solid #64748B;">
-          <div class="kpi-label">Lost / Declined</div>
-          <div class="kpi-value" id="kpiLost" style="color: #64748B;">0</div>
-          <div class="kpi-sub">Closed</div>
+
+        <!-- 2x2 KPI Cards Grid with Business Amounts -->
+        <div class="kpi-grid-2x2">
+          <button type="button" class="kpi-tile kpi-tile-total" onclick="setLeadsStatusFilter('All')">
+            <div class="kpi-tile-top">
+              <span class="kpi-icon">👥</span>
+              <span class="kpi-tag">ALL</span>
+            </div>
+            <div class="kpi-label">TOTAL LEADS</div>
+            <div class="kpi-value tabular-nums" id="kpiTotalLeads">0</div>
+            <div class="kpi-sub" id="kpiTotalSub">0 active • 0 won</div>
+          </button>
+
+          <button type="button" class="kpi-tile kpi-tile-active" onclick="setLeadsStatusFilter('All')">
+            <div class="kpi-tile-top">
+              <span class="kpi-icon">📈</span>
+              <span class="kpi-tag" id="kpiActiveCountTag">0 Deals</span>
+            </div>
+            <div class="kpi-label">ACTIVE PIPELINE</div>
+            <div class="kpi-amount tabular-nums" id="kpiActiveAmount">PKR 0</div>
+            <div class="kpi-sub">In-progress business</div>
+          </button>
+
+          <button type="button" class="kpi-tile kpi-tile-won" onclick="setLeadsStatusFilter('Converted')">
+            <div class="kpi-tile-top">
+              <span class="kpi-icon">✅</span>
+              <span class="kpi-tag" id="kpiWonCountTag">0 Won</span>
+            </div>
+            <div class="kpi-label">CONVERTED WON</div>
+            <div class="kpi-amount tabular-nums" id="kpiConvertedAmount">PKR 0</div>
+            <div class="kpi-sub" id="kpiConvertedSub">0 closed deals (0%)</div>
+          </button>
+
+          <button type="button" class="kpi-tile kpi-tile-lost" onclick="setLeadsStatusFilter('Lost')">
+            <div class="kpi-tile-top">
+              <span class="kpi-icon">❌</span>
+              <span class="kpi-tag" id="kpiLostCountTag">0 Lost</span>
+            </div>
+            <div class="kpi-label">LOST / DECLINED</div>
+            <div class="kpi-amount tabular-nums" id="kpiLostAmount">PKR 0</div>
+            <div class="kpi-sub" id="kpiLostSub">0 dropped lead(s)</div>
+          </button>
         </div>
       </div>
 
-      <!-- Search & Branch Supervisor Monitoring Card -->
+      <!-- Reordered Search & Branch Supervisor Monitoring Card -->
       <div class="card" style="margin-bottom: 14px;">
         <div class="card-title">
-          <span class="card-title-left"><span>🔍</span> Search &amp; Branch Supervisor Monitoring</span>
+          <span class="card-title-left"><span>🔍</span> Filters &amp; Branch Monitoring</span>
           <div style="display: flex; gap: 6px;">
             <button type="button" class="btn btn-outline btn-sm" style="width: auto;" onclick="exportFilteredLeadsCsv()">📥 Export CSV</button>
             <button type="button" class="btn btn-success btn-sm" style="width: auto;" onclick="manualSync()">🔄 Sync</button>
           </div>
         </div>
 
-        <div class="form-row stack-xs" style="margin-bottom: 10px;">
-          <div class="form-group" style="margin-bottom: 0;">
-            <label class="form-label" for="searchLeadsInput">Search Customer / Phone / Product / Officer</label>
-            <input type="text" class="form-input" id="searchLeadsInput" placeholder="Search leads..." oninput="renderLeads()">
-          </div>
-          <div class="form-group" style="margin-bottom: 0;">
-            <label class="form-label" for="statusFilterSelect">Status Filter</label>
-            <select class="form-select" id="statusFilterSelect" onchange="renderLeads()">
-              <option value="All">All Statuses</option>
-              <option value="New">New</option>
-              <option value="Contacted">Contacted</option>
-              <option value="Follow-Up">Follow-Up</option>
-              <option value="Converted">Converted</option>
-              <option value="Lost">Lost</option>
-            </select>
-          </div>
+        <!-- 1. Status Filter First -->
+        <div class="form-group">
+          <label class="form-label" for="statusFilterSelect">1. Status Filter</label>
+          <select class="form-select" id="statusFilterSelect" onchange="renderLeads()">
+            <option value="All">All Statuses</option>
+            <option value="New">New</option>
+            <option value="Contacted">Contacted</option>
+            <option value="Follow-Up">Follow-Up</option>
+            <option value="Converted">Converted</option>
+            <option value="Lost">Lost</option>
+          </select>
         </div>
 
-        <!-- Authorized Branch Supervisor Filter -->
+        <!-- 2. Customer Search Second -->
+        <div class="form-group">
+          <label class="form-label" for="searchLeadsInput">2. Search Customer / Phone / Product / Officer</label>
+          <input type="text" class="form-input" id="searchLeadsInput" placeholder="Search leads..." oninput="renderLeads()">
+        </div>
+
+        <!-- 3. Authorized Branch Supervisor Filter Third -->
         <div style="background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;">
           <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;">
-            <label class="form-label" for="supervisorBranchInput" style="margin-bottom: 0;">🛡️ Branch Supervisor Filter (BM / AM / RM Rights)</label>
-            <button type="button" class="btn btn-soft btn-sm" id="toggleMyBranchBtn" style="width: auto; min-height: 30px; height: 30px; font-size: 0.72rem;" onclick="toggleMyBranchFilter()">Filter My Branch</button>
+            <label class="form-label" for="supervisorBranchInput" style="margin-bottom: 0;">3. 🛡️ Branch Supervisor Filter (BM / AM / RM Rights)</label>
+            <button type="button" class="btn btn-soft btn-sm" id="toggleMyBranchBtn" style="width: auto; min-height: 30px; height: 30px; font-size: 0.72rem;" onclick="toggleMyBranchFilter()">🏢 Filter My Branch</button>
           </div>
-          <input type="text" class="form-input" id="supervisorBranchInput" placeholder="Type authorized branch name (e.g. Peshawar) to view all branch officers' leads..." oninput="renderLeads()">
+          <input type="text" class="form-input" id="supervisorBranchInput" placeholder="Type authorized branch name (e.g. PSR or Peshawar)..." oninput="renderLeads()">
           <div id="supervisorAccessStatus" style="font-size: 0.74rem; font-weight: 700; margin-top: 6px; color: var(--text-muted);"></div>
         </div>
       </div>
 
-      <!-- Folded / Expandable Lead Cards -->
+      <!-- Folded / Expandable Lead Cards (No Delete Button) -->
       <div id="leadsListContainer"></div>
     </section>
 
@@ -652,6 +698,7 @@
                 <input type="text" class="form-input" id="adminUserSearchInput" style="flex: 1; min-width: 200px;" placeholder="Search name, role, staff code, branch, or email..." oninput="renderAdminUsersList()">
                 <button type="button" class="btn btn-primary btn-sm" style="width: auto;" onclick="openEditUserAccessModal(null)">➕ Add User</button>
                 <button type="button" class="btn btn-outline btn-sm" style="width: auto;" onclick="refreshAdminUsersFromFirestore()">🔄 Refresh</button>
+
               </div>
               <div id="adminUsersList"></div>
             </div>
@@ -692,7 +739,7 @@
     </section>
 
     <!-- ========================================================== -->
-    <!-- TAB 4: OFFICER PROFILE & SYNC SETTINGS                     -->
+    <!-- TAB 3: OFFICER PROFILE & PERSONAL OFFLINE BACKUP           -->
     <!-- ========================================================== -->
     <section class="tab-content" id="settingsTab">
       <div class="admin-cards-grid">
@@ -717,40 +764,42 @@
         </div>
 
         <div class="card">
-          <div class="card-title"><span class="card-title-left"><span>👤</span> Officer Profile &amp; Branch</span></div>
+          <div class="card-title"><span class="card-title-left"><span>👤</span> Officer Profile &amp; Cloud Branch</span></div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label" for="settingsOfficerName">Officer Name</label>
-              <input type="text" class="form-input" id="settingsOfficerName" placeholder="Anjum Naveed">
+              <input type="text" class="form-input" id="settingsOfficerName" placeholder="Officer Name">
             </div>
             <div class="form-group">
               <label class="form-label" for="settingsStaffId">Staff / Officer ID</label>
-              <input type="text" class="form-input" id="settingsStaffId" placeholder="RM-8433">
+              <input type="text" class="form-input" id="settingsStaffId" placeholder="Staff Code">
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label" for="settingsBranch">Assigned Branch</label>
-            <input type="text" class="form-input" id="settingsBranch" placeholder="Main Branch">
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="settingsWebhookUrl">Google Sheets Webhook URL (Optional Override)</label>
-            <input type="url" class="form-input" id="settingsWebhookUrl" placeholder="https://script.google.com/macros/s/.../exec">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+              <label class="form-label" for="settingsBranch" style="margin-bottom: 0;">Assigned Branch (Cloud-Locked)</label>
+              <span style="font-size: 0.68rem; font-weight: 800; color: var(--primary);">🔒 Synced from Admin</span>
+            </div>
+            <input type="text" class="form-input" id="settingsBranch" readonly title="Assigned by Admin in Cloud" placeholder="Synced after Google Sign-In">
           </div>
           <button type="button" class="btn btn-primary" onclick="saveSettings()">💾 Save Profile &amp; Sync to Cloud</button>
         </div>
 
         <div class="card admin-card-wide">
-          <div class="card-title"><span class="card-title-left"><span>💾</span> Offline Cache &amp; Backup</span></div>
+          <div class="card-title"><span class="card-title-left"><span>💾</span> My Personal Offline Cache &amp; Backup</span></div>
           <div class="result-row">
-            <span>Total Saved Leads in Browser:</span>
+            <span>My Personal Leads Cached:</span>
             <strong id="statTotalLeads">0</strong>
           </div>
           <div class="result-row">
-            <span>Pending Sync to Google Sheet:</span>
+            <span>My Pending Sync Leads:</span>
             <strong id="statPendingSync">0</strong>
           </div>
+          <p style="font-size: 0.74rem; color: var(--text-muted); margin-top: 6px;">
+            یہ سیکشن صرف آپ کی اپنی ذاتی لیڈز کا بیک اپ رکھتا ہے (کسی دوسرے آفیسر یا برانچ کا ڈیٹا اس میں شامل نہیں ہوتا)۔
+          </p>
           <div class="btn-group">
-            <button type="button" class="btn btn-outline" onclick="exportLeadsJson()">📥 Backup All Leads (JSON)</button>
+            <button type="button" class="btn btn-outline" onclick="exportLeadsJson()">📥 Backup My Leads (JSON)</button>
             <button type="button" class="btn btn-success" onclick="manualSync()">🔄 Sync Now</button>
           </div>
         </div>
