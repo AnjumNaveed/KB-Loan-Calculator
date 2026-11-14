@@ -5,11 +5,13 @@
  * Allow/Deny user access control, WhatsApp/SMS quotations, and Google Sheets in-place sync.
  */
 
-// 1. FIREBASE BRIDGE STATE
+// 1. FIREBASE & GOOGLE IDENTITY SERVICES (GIS) BRIDGE STATE
+const GOOGLE_WEB_CLIENT_ID = "184681541597-4n1vcijaaf2eh00i4t98us29d9nf0o14.apps.googleusercontent.com";
 let fb = null;
 let currentUser = null;
 let currentUserProfile = null;
 let firebaseInitialized = false;
+let gisInitialized = false;
 let unsubscribeProducts = null;
 let unsubscribeLeads = null;
 let unsubscribeGlobalConfig = null;
@@ -297,6 +299,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (window.FirebaseBridge) {
     initFirebaseAuthAndFirestore();
   }
+  initGoogleIdentityServices();
 
   // Register online/offline listeners
   window.addEventListener('online', () => {
@@ -313,9 +316,12 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
-// Wait for ES Module Firebase Bridge if it finishes slightly after DOMContentLoaded
+// Wait for ES Module Firebase Bridge & GIS Script if they load after DOMContentLoaded
 window.addEventListener('firebase-bridge-ready', () => {
   initFirebaseAuthAndFirestore();
+});
+window.addEventListener('gis-script-ready', () => {
+  initGoogleIdentityServices();
 });
 
 // 6. FIREBASE AUTH & ACCESS CONTROL GATE (ALLOW / DENY)
@@ -333,7 +339,9 @@ function initFirebaseAuthAndFirestore() {
 
   fb.onAuthStateChanged(async (user) => {
     currentUser = user;
+    const headerWrap = document.getElementById('gisHeaderButtonWrap');
     const authBtn = document.getElementById('googleSignInBtn');
+    const gisSettingsSlot = document.getElementById('gisSettingsSlot');
     const chip = document.getElementById('userProfileChip');
     const avatarImg = document.getElementById('userAvatarImg');
     const nameSpan = document.getElementById('userNameSpan');
@@ -343,14 +351,18 @@ function initFirebaseAuthAndFirestore() {
     const settingsRole = document.getElementById('settingsUserRole');
 
     if (user) {
-      authBtn.style.display = 'none';
+      if (headerWrap) headerWrap.style.display = 'none';
+      if (authBtn) authBtn.style.display = 'none';
+      if (gisSettingsSlot) gisSettingsSlot.style.display = 'none';
       chip.style.display = 'inline-flex';
       nameSpan.textContent = user.displayName || (user.email ? user.email.split('@')[0] : 'Officer');
       if (user.photoURL) {
         avatarImg.src = user.photoURL;
       }
       settingsEmail.textContent = user.email || 'Google User';
+      settingsAuthBtn.style.display = 'inline-flex';
       settingsAuthBtn.textContent = '🚪 Sign Out';
+      closeModal('googleSignInModal');
 
       // Start Global Config & Access Control Listeners
       startFirestoreGlobalConfigListener(user);
@@ -363,14 +375,17 @@ function initFirebaseAuthAndFirestore() {
       startFirestoreProductsListener();
       startFirestoreLeadsListener();
     } else {
-      authBtn.style.display = 'inline-flex';
+      if (headerWrap) headerWrap.style.display = 'inline-flex';
+      if (gisSettingsSlot) gisSettingsSlot.style.display = 'flex';
       chip.style.display = 'none';
       settingsEmail.textContent = 'Not signed in';
+      settingsAuthBtn.style.display = 'inline-flex';
       settingsAuthBtn.textContent = '🔑 Sign In with Google';
       settingsStatus.textContent = 'Local Guest Mode';
       settingsStatus.style.color = '#F59E0B';
       settingsRole.textContent = 'Loan Officer';
 
+      renderGisButtons();
       hideAccessDeniedScreen();
 
       if (unsubscribeProducts) { unsubscribeProducts(); unsubscribeProducts = null; }
@@ -577,16 +592,121 @@ function copyUnauthorizedHost() {
   }
 }
 
+// 6B. GOOGLE IDENTITY SERVICES (GIS) SIGN-IN (Shows "KBL loan calculator" instead of firebaseapp.com)
+function initGoogleIdentityServices() {
+  if (gisInitialized) return;
+  if (!window.google || !window.google.accounts || !window.google.accounts.id) return;
+
+  try {
+    window.google.accounts.id.initialize({
+      client_id: GOOGLE_WEB_CLIENT_ID,
+      callback: handleGoogleCredentialResponse,
+      auto_select: false,
+      cancel_on_tap_outside: true,
+      context: 'signin'
+    });
+    gisInitialized = true;
+    renderGisButtons();
+  } catch (e) {
+    console.warn('GIS initialization notice:', e);
+  }
+}
+
+function renderGisButtons() {
+  if (!gisInitialized || !window.google || !window.google.accounts || !window.google.accounts.id) return;
+
+  const headerSlot = document.getElementById('gisHeaderSlot');
+  const fallbackBtn = document.getElementById('googleSignInBtn');
+  const settingsSlot = document.getElementById('gisSettingsSlot');
+  const modalSlot = document.getElementById('gisModalSlot');
+
+  try {
+    if (headerSlot && !currentUser) {
+      headerSlot.innerHTML = '';
+      window.google.accounts.id.renderButton(headerSlot, {
+        type: 'standard',
+        theme: 'outline',
+        size: 'medium',
+        text: 'signin',
+        shape: 'pill'
+      });
+      if (fallbackBtn) fallbackBtn.style.display = 'none';
+    }
+    if (settingsSlot && !currentUser) {
+      settingsSlot.innerHTML = '';
+      window.google.accounts.id.renderButton(settingsSlot, {
+        type: 'standard',
+        theme: 'outline',
+        size: 'large',
+        text: 'signin_with',
+        shape: 'rectangular',
+        width: 260
+      });
+    }
+    if (modalSlot) {
+      modalSlot.innerHTML = '';
+      window.google.accounts.id.renderButton(modalSlot, {
+        type: 'standard',
+        theme: 'filled_blue',
+        size: 'large',
+        text: 'signin_with',
+        shape: 'rectangular',
+        width: 280
+      });
+    }
+  } catch (e) {
+    console.warn('GIS renderButton notice:', e);
+    if (fallbackBtn && !currentUser) fallbackBtn.style.display = 'inline-flex';
+  }
+}
+
+async function handleGoogleCredentialResponse(response) {
+  if (!response || !response.credential) {
+    alert('Google Sign-In did not return a credential.');
+    return;
+  }
+  if (!fb) {
+    alert('Firebase is still initializing. Please try again in a moment.');
+    return;
+  }
+  try {
+    await fb.signInWithGoogleIdToken(response.credential);
+    closeModal('googleSignInModal');
+  } catch (err) {
+    handleAuthError(err);
+  }
+}
+
 // Sign-In & Sign-Out Handlers
 async function signInWithGoogle() {
   if (!fb) {
     alert('Firebase Auth is still initializing or the device is offline. Please wait a second and try again.');
     return;
   }
+
+  initGoogleIdentityServices();
+  const originEl = document.getElementById('gisOriginText');
+  if (originEl) originEl.textContent = window.location.origin;
+
+  if (gisInitialized && window.google && window.google.accounts && window.google.accounts.id) {
+    renderGisButtons();
+    openModal('googleSignInModal');
+    try {
+      window.google.accounts.id.prompt();
+    } catch (e) {}
+    return;
+  }
+
+  // Fallback if GIS script was blocked or offline
+  await signInWithFirebasePopupFallback();
+}
+
+async function signInWithFirebasePopupFallback() {
+  if (!fb) return;
+  closeModal('googleSignInModal');
   const isStandalonePWA = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
   try {
     if (isStandalonePWA) {
-      // Standalone iOS / Android PWA works more reliably with redirect
       await fb.signInWithGoogleRedirect();
     } else {
       await fb.signInWithGooglePopup();
@@ -607,6 +727,9 @@ async function signInWithGoogle() {
 async function signOutUser() {
   if (!fb) return;
   try {
+    if (window.google && window.google.accounts && window.google.accounts.id) {
+      window.google.accounts.id.disableAutoSelect();
+    }
     await fb.signOut();
     hideAccessDeniedScreen();
     alert('Logged out successfully.');
