@@ -1,36 +1,39 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>KB Loan Calculator & CRM</title>
-  <meta name="description" content="Bank Loan & Deposit Calculator with Lead Management, Google Sign-In, and Firebase Real-time Sync">
+  <title>KBL Loan Calculator & CRM</title>
+  <meta name="description" content="KBL Bank Loan & Deposit Calculator with Lead CRM, Interactive Amortization, Google Sign-In, and Real-Time Firestore Sync">
 
   <!-- PWA & Apple Mobile Web App Metas -->
   <link rel="manifest" href="./manifest.json">
   <meta name="theme-color" content="#1E3A8A">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="KB Calc">
+  <meta name="apple-mobile-web-app-title" content="KBL Calc">
   <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192' width='192' height='192'%3E%3Crect width='192' height='192' rx='42' fill='%231E3A8A'/%3E%3Cpath d='M96 38L42 70v14h108V70L96 38zm-44 54h18v52H52V92zm36 0h18v52H88V92zm36 0h18v52h-18V92zM36 150v14h120v-14H36z' fill='%23FBBF24'/%3E%3C/svg%3E">
 
   <link rel="stylesheet" href="./styles.css">
   <script src="https://accounts.google.com/gsi/client" async defer onload="window.dispatchEvent(new Event('gis-script-ready'))"></script>
 </head>
 <body>
+  <!-- Toast Feedback -->
+  <div id="toastBanner" class="toast-banner"></div>
+
   <!-- ACCESS RESTRICTED SCREEN (BLOCKED USER GATE) -->
   <div class="access-denied-screen" id="accessDeniedScreen">
     <div class="access-card">
-      <div class="access-icon">🚫</div>
-      <div class="access-title">Access Restricted</div>
-      <div class="access-subtitle">آپ کا اکاؤنٹ ایڈمن کی منظوری کا منتظر ہے یا غیر فعال ہے</div>
-      <div class="access-details" id="accessDetailsBox">
+      <div style="font-size: 3rem; margin-bottom: 10px;">🚫</div>
+      <div style="font-size: 1.25rem; font-weight: 800; color: #F87171; margin-bottom: 8px;">Access Restricted</div>
+      <div style="font-size: 0.92rem; font-weight: 600; color: #E2E8F0; margin-bottom: 12px;">آپ کا اکاؤنٹ ایڈمن کی منظوری کا منتظر ہے یا غیر فعال ہے</div>
+      <div style="background: #0F172A; border-radius: 8px; padding: 12px; font-size: 0.8rem; color: #94A3B8; margin-bottom: 16px; text-align: left;">
         <div><strong>User:</strong> <span id="deniedUserEmail">Loading...</span></div>
-        <div style="margin-top: 3px;"><strong>UID:</strong> <span id="deniedUserUid" style="font-size: 0.75rem;">...</span></div>
+        <div style="margin-top: 3px;"><strong>UID:</strong> <span id="deniedUserUid" style="font-size: 0.74rem;">...</span></div>
         <div style="margin-top: 6px; color: #F87171; font-weight: 700;">Status: Account Inactive / Blocked in Firestore</div>
       </div>
-      <p style="font-size: 0.84rem; color: #94A3B8; margin-bottom: 18px; line-height: 1.5;">
-        برائے مہربانی ایپ استعمال کرنے کے لیے اپنے برانچ مینیجر یا ایڈمنسٹریٹر سے رابطہ کریں تاکہ وہ آپ کے اکاؤنٹ کو اینڈرائیڈ ایڈمن پینل یا فائر اسٹور سے فعال (Allow) کر سکیں۔
+      <p style="font-size: 0.82rem; color: #94A3B8; margin-bottom: 16px; line-height: 1.5;">
+        برائے مہربانی ایپ استعمال کرنے کے لیے اپنے برانچ مینیجر یا ایڈمنسٹریٹر سے رابطہ کریں تاکہ وہ آپ کے اکاؤنٹ کو ایڈمن پینل یا فائر اسٹور سے فعال (Allow) کر سکیں۔
       </p>
       <div class="btn-group">
         <button type="button" class="btn btn-outline" onclick="signOutUser()" style="color: white; border-color: #64748B;">Sign Out / لاگ آؤٹ</button>
@@ -44,14 +47,16 @@
     <header class="app-header">
       <div class="header-top">
         <div class="brand-title">
-          <svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor">
+          <svg class="brand-icon" viewBox="0 0 24 24" fill="#FBBF24">
             <path d="M4 10h3v7H4zM10.5 10h3v7h-3zM2 22h20v-3H2v3zm15-12h3v7h-3zM12 1L2 6v2h20V6L12 1z"/>
           </svg>
-          <span>KB Calculator & CRM</span>
+          <div>
+            <span>KBL Loan Calculator</span>
+            <span class="brand-subtitle">Enterprise Financing, Deposits & Branch CRM</span>
+          </div>
         </div>
 
         <div class="header-actions">
-          <!-- Google Sign-In Container (GIS Primary + Fallback) -->
           <div id="authContainer">
             <div id="gisHeaderButtonWrap" style="display: inline-flex; align-items: center;">
               <div id="gisHeaderSlot"></div>
@@ -67,7 +72,7 @@
             </div>
           </div>
 
-          <div class="sync-badge" id="onlineBadge" onclick="manualSync()">
+          <div class="sync-badge" id="onlineBadge" onclick="manualSync()" title="Tap to sync with Firestore & Google Sheets">
             <span class="status-dot" id="statusDot"></span>
             <span id="statusText">Online</span>
           </div>
@@ -75,165 +80,328 @@
       </div>
 
       <div class="officer-subbar">
-        <span id="officerBadge">👤 Officer: Loan Officer (RO)</span>
+        <span id="officerBadge">👤 Officer: Anjum Naveed (RM-8433)</span>
         <span id="branchBadge">🏢 Main Branch</span>
       </div>
     </header>
 
+    <!-- Force Update Banner (if Admin published update link) -->
+    <div class="app-update-banner" id="appUpdateBanner">
+      <span id="appUpdateBannerText">📲 New update available</span>
+      <a id="appUpdateBannerLink" href="#" target="_blank" rel="noopener" class="btn btn-primary btn-sm" style="width: auto; text-decoration: none;">Open Update</a>
+    </div>
+
     <!-- iOS / Android Home Screen Install Banner -->
     <div class="install-banner" id="pwaBanner">
-      <span>📲 Add this app to your Home Screen for instant offline access!</span>
+      <span>📲 Add KBL Calculator to Home Screen for instant offline access</span>
       <button type="button" onclick="showInstallHelp()">How to Add</button>
     </div>
 
     <!-- Navigation Tabs -->
     <nav class="tab-nav">
-      <div class="nav-item active" onclick="switchTab('calcTab', this)">
+      <div class="nav-item active" data-tab="calcTab" onclick="switchTab('calcTab', this)">
         <span>📊</span> Calculator
       </div>
-      <div class="nav-item" onclick="switchTab('leadsTab', this)">
+      <div class="nav-item" data-tab="leadsTab" onclick="switchTab('leadsTab', this)">
         <span>👥</span> Leads (<span id="leadsCount">0</span>)
       </div>
-      <div class="nav-item" onclick="switchTab('settingsTab', this)">
-        <span>⚙️</span> Settings
+      <div class="nav-item" data-tab="adminTab" onclick="switchTab('adminTab', this)">
+        <span id="adminNavIcon">🔒</span> Admin &amp; Slabs
+      </div>
+      <div class="nav-item" data-tab="settingsTab" onclick="switchTab('settingsTab', this)">
+        <span>⚙️</span> Profile
       </div>
     </nav>
 
-    <!-- TAB 1: CALCULATOR -->
+    <!-- ========================================================== -->
+    <!-- TAB 1: CALCULATOR & ELIGIBILITY (Responsive 2-Col Desktop) -->
+    <!-- ========================================================== -->
     <main class="tab-content active" id="calcTab">
-      <div class="card">
-        <div class="card-title">
-          <span>🏦</span> Facility & Product Setup
+      <div class="calc-grid">
+        <!-- LEFT COLUMN: Customer Profile, Loan Facility, DBR -->
+        <div class="calc-col-left">
+          <!-- CARD 1: CUSTOMER PROFILE -->
+          <div class="card">
+            <div class="card-title">
+              <span class="card-title-left"><span>👤</span> Customer Profile (کسٹمر پروفائل)</span>
+              <button type="button" class="btn btn-outline btn-sm" style="width: auto;" onclick="resetCalculatorForm()">Clear</button>
+            </div>
+
+            <div class="form-row stack-xs">
+              <div class="form-group">
+                <label class="form-label" for="customerName">Customer Name</label>
+                <input type="text" class="form-input" id="customerName" placeholder="e.g. Muhammad Ali" oninput="onCustomerProfileInput()">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="customerMobile">Mobile Number</label>
+                <input type="tel" class="form-input" id="customerMobile" placeholder="03001234567" oninput="onCustomerProfileInput()">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="customerDob">Date of Birth (تاریخِ پیدائش - Age &amp; Maturity Eligibility)</label>
+              <input type="date" class="form-input" id="customerDob" onchange="onDobOrCalcChange()" oninput="onDobOrCalcChange()">
+            </div>
+
+            <!-- Live Age & Product Eligibility Badge -->
+            <div id="ageEligibilityPill" class="age-status-pill"></div>
+
+            <div class="form-group">
+              <label class="form-label" for="leadNotes">Specific Lead Note / Comments</label>
+              <textarea class="form-textarea" id="leadNotes" placeholder="Customer comments, income source, callback preference..."></textarea>
+            </div>
+          </div>
+
+          <!-- CARD 2: LOAN FACILITY & TIERED PRICING -->
+          <div class="card">
+            <div class="card-title">
+              <span class="card-title-left"><span>🏦</span> Loan Facility &amp; Tiered Pricing</span>
+              <span id="firestoreProductSyncBadge" style="font-size: 0.72rem; color: var(--success); font-weight: 700;">⚡ Live Ready</span>
+            </div>
+
+            <!-- Category Filter Pills: All, Asset, Liability -->
+            <div class="form-group">
+              <label class="form-label">Facility Category Filter</label>
+              <div class="chip-row">
+                <button type="button" class="chip-btn active" id="catAllBtn" onclick="setCategory('all')">All (0)</button>
+                <button type="button" class="chip-btn" id="catAssetBtn" onclick="setCategory('asset')">💼 Asset (0)</button>
+                <button type="button" class="chip-btn" id="catLiabBtn" onclick="setCategory('liability')">💰 Liability (0)</button>
+              </div>
+            </div>
+
+            <!-- Search Product Box -->
+            <div class="form-group">
+              <label class="form-label" for="productSearchInput">Search Product (پراڈکٹ تلاش کریں)</label>
+              <input type="text" class="form-input" id="productSearchInput" placeholder="Search by product name, rate type, asset or deposit..." oninput="populateProducts(currentProduct ? currentProduct.id : null)">
+            </div>
+
+            <!-- Full Product Dropdown -->
+            <div class="form-group">
+              <label class="form-label" for="productSelect">Select Bank Product</label>
+              <select class="form-select" id="productSelect" onchange="onProductChange()"></select>
+            </div>
+
+            <!-- View Security & Collateral Details -->
+            <div class="form-group">
+              <button type="button" class="btn btn-soft btn-sm" id="viewCollateralBtn" onclick="openCollateralModal()">
+                🛡️ View Security &amp; Collateral Requirements
+              </button>
+            </div>
+
+            <!-- Desired Loan / Deposit Amount -->
+            <div class="form-group">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <label class="form-label" id="amountLabel" for="loanAmount" style="margin-bottom: 0;">Desired Loan Amount (PKR)</label>
+                <button type="button" class="btn btn-outline btn-sm" style="width: auto; min-height: 26px; height: 26px; font-size: 0.7rem; padding: 0 8px;" onclick="clearDesiredAmount()">Clear (Auto-Max)</button>
+              </div>
+              <input type="number" class="form-input" id="loanAmount" value="" placeholder="Leave BLANK to auto-build max plans up to tenure" oninput="calculate()">
+              <div id="desiredAmountHint" style="font-size: 0.74rem; color: var(--accent); font-weight: 700; margin-top: 4px;"></div>
+            </div>
+
+            <!-- Quick Tenure Selector for Quick Quote Preview -->
+            <div class="form-group">
+              <label class="form-label" for="tenureMonths">Active Preview Tenure (Months)</label>
+              <select class="form-select" id="tenureMonths" onchange="onTenureSelectChange()"></select>
+            </div>
+
+            <!-- Tax Filer / Non-Filer Selector for Deposits -->
+            <div id="filerTaxSelectorCard" style="display: none; margin-top: 8px; padding: 10px; border-radius: 10px; background: var(--surface-subtle); border: 1px solid var(--border);">
+              <div style="font-size: 0.75rem; font-weight: 800; color: var(--teal); margin-bottom: 6px;">👤 Customer Tax Status (ودہولڈنگ ٹیکس)</div>
+              <div class="chip-row">
+                <button type="button" class="chip-btn active-teal" id="filerChipBtn" onclick="setFilerStatus(true)" style="flex: 1;">✅ Filer (<span id="filerRateChipTxt">20</span>%)</button>
+                <button type="button" class="chip-btn" id="nonFilerChipBtn" onclick="setFilerStatus(false)" style="flex: 1;">⚠️ Non-Filer (<span id="nonFilerRateChipTxt">40</span>%)</button>
+              </div>
+            </div>
+            <div id="currentAccountNotice" style="display: none; margin-top: 8px; padding: 10px; border-radius: 10px; background: var(--teal-soft); color: var(--teal); font-size: 0.78rem; font-weight: 700;">
+              🛡️ Current Account (0% Profit / لاگت و منافع سے پاک، کوئی ٹیکس کٹوتی نہیں)
+            </div>
+          </div>
+
+          <!-- CARD 3: DEBT BURDEN RATIO (DBR) / DEPOSIT RETURN SUMMARY -->
+          <div class="card" id="financialCapacityCard">
+            <!-- Asset DBR View -->
+            <div id="dbrCardContent">
+              <div class="card-title">
+                <span class="card-title-left"><span>📊</span> Debt Burden Ratio (DBR Capacity)</span>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label" for="monthlyIncome">Net Monthly Income (PKR)</label>
+                  <input type="number" class="form-input" id="monthlyIncome" placeholder="e.g. 150000" oninput="calculate()">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="allowedDbr">Manual Allowed DBR (%)</label>
+                  <input type="number" class="form-input" id="allowedDbr" value="50" min="1" max="100" placeholder="50" oninput="calculate()">
+                </div>
+              </div>
+
+              <div class="dark-glass-card" style="margin-top: 6px;">
+                <div style="font-size: 0.76rem; color: #CBD5E1;">Max Allowable Monthly Installment (DBR Cap):</div>
+                <div id="dbrCapResult" class="tabular-nums" style="font-size: 1.3rem; font-weight: 900; color: #FBBF24; margin-top: 2px;">Enter Income &amp; DBR</div>
+              </div>
+            </div>
+
+            <!-- Liability Deposit Summary View -->
+            <div id="depositSummaryCardContent" style="display: none;">
+              <div class="card-title">
+                <span class="card-title-left"><span>💰</span> Deposit Return &amp; WHT Summary</span>
+              </div>
+              <div class="dark-glass-card">
+                <div class="form-row" style="margin-bottom: 10px;">
+                  <div>
+                    <div style="font-size: 0.72rem; color: #94A3B8;">Monthly Profit:</div>
+                    <div id="depGrossMo" class="tabular-nums" style="font-size: 0.96rem; font-weight: 700;">PKR 0 / mo</div>
+                    <div id="depTaxMo" class="tabular-nums" style="font-size: 0.72rem; color: #F87171;">Tax: -PKR 0</div>
+                    <div id="depNetMo" class="tabular-nums" style="font-size: 0.98rem; font-weight: 900; color: #34D399;">Net: PKR 0 / mo</div>
+                  </div>
+                  <div style="text-align: right;">
+                    <div id="depTermTitle" style="font-size: 0.72rem; color: #94A3B8;">Total Profit (12M):</div>
+                    <div id="depGrossTot" class="tabular-nums" style="font-size: 0.96rem; font-weight: 700;">PKR 0</div>
+                    <div id="depTaxTot" class="tabular-nums" style="font-size: 0.72rem; color: #F87171;">Tax: -PKR 0</div>
+                    <div id="depNetTot" class="tabular-nums" style="font-size: 0.98rem; font-weight: 900; color: #FBBF24;">Net: PKR 0</div>
+                  </div>
+                </div>
+                <div style="border-top: 1px solid rgba(255,255,255,0.15); padding-top: 8px; display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-size: 0.78rem; color: #CBD5E1;">Net Maturity Payout:</span>
+                  <strong id="depNetMaturity" class="tabular-nums" style="font-size: 1.15rem; color: #FFFFFF;">PKR 0</strong>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">Category</label>
-          <div class="form-row">
-            <button type="button" class="btn btn-primary" id="catAssetBtn" onclick="setCategory('asset')">💼 Asset (Loan)</button>
-            <button type="button" class="btn btn-outline" id="catLiabBtn" onclick="setCategory('liability')">💰 Liability (Deposit)</button>
-          </div>
-        </div>
+        <!-- RIGHT COLUMN: Dispatch & Communication + Eligibility Matrix -->
+        <div class="calc-col-right">
+          <!-- CARD 4: DISPATCH & COMMUNICATION (NON-WRAPPING) -->
+          <div class="card">
+            <div class="card-title">
+              <span class="card-title-left"><span>📤</span> Dispatch &amp; Communication</span>
+              <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700;">Auto-Saves Lead</span>
+            </div>
 
-        <div class="form-group">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-            <label class="form-label" for="productSelect" style="margin-bottom: 0;">Select Product</label>
-            <span id="firestoreProductSyncBadge" style="font-size: 0.72rem; color: var(--success); font-weight: 600;">⚡ Firestore Live</span>
-          </div>
-          <select class="form-select" id="productSelect" onchange="onProductChange()">
-            <!-- Populated via JS / Firestore -->
-          </select>
-        </div>
+            <!-- Live Selected Plan Quick Breakdown -->
+            <div class="results-box" style="margin-top: 0; margin-bottom: 12px;">
+              <div class="result-row">
+                <span id="rateLabel">Applied Profit Rate:</span>
+                <strong id="resRate" class="tabular-nums">0%</strong>
+              </div>
+              <div class="result-row" id="resPrincipalRow">
+                <span id="resPrincipalLabel">Computed Principal:</span>
+                <strong id="resPrincipal" class="tabular-nums">PKR 0</strong>
+              </div>
+              <div class="result-row" id="emiRow">
+                <span id="emiRowLabel">Monthly Installment (EMI):</span>
+                <strong id="resEmi" class="tabular-nums">PKR 0</strong>
+              </div>
+              <div class="result-row" id="dbrRow">
+                <span>DBR Ratio:</span>
+                <strong id="resDbr" class="tabular-nums">0%</strong>
+              </div>
+              <div class="result-row" id="feeRow">
+                <span id="feeRowLabel">Processing Fee (inc. FED):</span>
+                <strong id="resFee" class="tabular-nums">PKR 0</strong>
+              </div>
+              <div class="result-row highlight">
+                <span id="totalPayableLabel">Total Repayable Amount:</span>
+                <span id="resTotalPayable" class="tabular-nums">PKR 0</span>
+              </div>
+            </div>
 
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label" for="customerName">Customer Name</label>
-            <input type="text" class="form-input" id="customerName" placeholder="e.g. Muhammad Ali">
+            <!-- Short Non-Wrapping Action Buttons -->
+            <div class="dispatch-grid">
+              <button type="button" class="btn btn-whatsapp" onclick="sendQuotationWhatsApp()">💬 WhatsApp</button>
+              <button type="button" class="btn btn-sms" onclick="sendQuotationSMS()">✉️ SMS</button>
+              <button type="button" class="btn btn-copy" onclick="copyProposalText()">📋 Copy</button>
+              <button type="button" class="btn btn-primary" onclick="saveLeadFromCalculator()">💾 Save Lead</button>
+            </div>
+            <div style="margin-top: 8px; display: flex; gap: 8px;" id="amortQuickRow">
+              <button type="button" class="btn btn-outline btn-sm" id="amortBtn" onclick="openAmortizationModal()">📜 Open Amortization &amp; Prepayment Schedule</button>
+            </div>
           </div>
-          <div class="form-group">
-            <label class="form-label" for="customerMobile">Mobile Number</label>
-            <input type="tel" class="form-input" id="customerMobile" placeholder="03001234567">
-          </div>
-        </div>
 
-        <div class="form-row" id="incomeRow">
-          <div class="form-group">
-            <label class="form-label" for="monthlyIncome">Monthly Income (PKR)</label>
-            <input type="number" class="form-input" id="monthlyIncome" placeholder="e.g. 80000" oninput="calculate()">
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="allowedDbr">Allowed DBR (%)</label>
-            <select class="form-select" id="allowedDbr" onchange="calculate()">
-              <option value="50">50% Standard</option>
-              <option value="40">40% Conservative</option>
-              <option value="60">60% Special Exception</option>
-            </select>
-          </div>
-        </div>
+          <!-- CARD 5: INTERACTIVE ELIGIBILITY MATRIX -->
+          <div class="card">
+            <div class="card-title">
+              <span class="card-title-left"><span>📋</span> Eligibility Matrix (All Automatic Plans)</span>
+              <span id="matrixModeBadge" class="badge badge-new">AUTO-MAX</span>
+            </div>
 
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label" id="amountLabel" for="loanAmount">Loan Amount (PKR)</label>
-            <input type="number" class="form-input" id="loanAmount" value="500000" oninput="calculate()">
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="tenureMonths">Tenure (Months)</label>
-            <select class="form-select" id="tenureMonths" onchange="calculate()">
-              <!-- Populated via JS -->
-            </select>
-          </div>
-        </div>
+            <p style="font-size: 0.76rem; color: var(--text-muted); margin-bottom: 8px;">
+              کسی بھی پلان پر کلک کریں تو اس کا مکمل Amortization Schedule کھل جائے گا۔
+            </p>
 
-        <!-- Filer Toggle for Deposits -->
-        <div class="toggle-wrapper" id="filerToggleRow" style="display: none;">
-          <span id="filerToggleLabel" style="font-size: 0.88rem; font-weight: 600;">Active Tax Filer (20% Tax vs 40% Non-Filer)</span>
-          <label class="toggle-switch">
-            <input type="checkbox" id="isFilerToggle" checked onchange="calculate()">
-            <span class="slider"></span>
-          </label>
-        </div>
+            <!-- Tenure Range Chips -->
+            <div class="chip-scroll" id="matrixFilterChips"></div>
 
-        <div class="form-group">
-          <label class="form-label" for="leadNotes">Notes / Comments (Optional)</label>
-          <textarea class="form-textarea" id="leadNotes" placeholder="Type comments here (e.g. Call customer after 4 PM)"></textarea>
-        </div>
+            <!-- Notice if Income/DBR needed -->
+            <div id="matrixEmptyNotice" style="display: none; text-align: center; padding: 24px 14px; background: var(--surface-subtle); border-radius: 10px; border: 1px dashed var(--border); margin-top: 10px;">
+              <div style="font-size: 1.6rem; margin-bottom: 6px;">📊</div>
+              <div style="font-weight: 800; font-size: 0.9rem; margin-bottom: 4px;">Enter Monthly Income &amp; DBR %</div>
+              <div style="font-size: 0.78rem; color: var(--text-muted); line-height: 1.45;">
+                خالص ماہانہ آمدنی اور DBR درج کریں (یا Desired Loan Amount لکھیں) تاکہ پروڈکٹ کے تمام پلانز خودکار تیار ہوں۔
+              </div>
+            </div>
 
-        <!-- Calculation Results Box -->
-        <div class="results-box" id="resultsBox">
-          <div class="result-row">
-            <span id="rateLabel">Applied Annual Profit Rate:</span>
-            <strong id="resRate">39.5%</strong>
+            <div class="matrix-scroll-box" id="matrixTableContainer">
+              <table class="matrix-table">
+                <thead id="matrixTableHead"></thead>
+                <tbody id="matrixTableBody"></tbody>
+              </table>
+            </div>
           </div>
-          <div class="result-row" id="emiRow">
-            <span>Monthly Installment (EMI):</span>
-            <strong id="resEmi">PKR 0</strong>
-          </div>
-          <div class="result-row" id="dbrRow">
-            <span>DBR Ratio:</span>
-            <strong id="resDbr">0%</strong>
-          </div>
-          <div class="result-row" id="feeRow">
-            <span>Processing Fee (inc. 16% FED):</span>
-            <strong id="resFee">PKR 0</strong>
-          </div>
-          <div class="result-row" id="profitRow">
-            <span id="profitLabel">Total Profit / Markup:</span>
-            <strong id="resProfit">PKR 0</strong>
-          </div>
-          <div class="result-row highlight">
-            <span id="totalPayableLabel">Total Repayable Amount:</span>
-            <span id="resTotalPayable">PKR 0</span>
-          </div>
-        </div>
-
-        <!-- Action Buttons -->
-        <div class="btn-group">
-          <button type="button" class="btn btn-primary" onclick="saveLeadFromCalculator()">💾 Save Lead</button>
-          <button type="button" class="btn btn-whatsapp" onclick="sendQuotationWhatsApp()">💬 WhatsApp</button>
-          <button type="button" class="btn btn-sms" onclick="sendQuotationSMS()">✉️ SMS</button>
-          <button type="button" class="btn btn-outline" id="amortBtn" onclick="openAmortizationModal()">📋 Amort</button>
         </div>
       </div>
     </main>
 
-    <!-- TAB 2: CUSTOMER LEADS -->
+    <!-- ========================================================== -->
+    <!-- TAB 2: LEADS DASHBOARD & SUPERVISOR MONITORING CRM         -->
+    <!-- ========================================================== -->
     <section class="tab-content" id="leadsTab">
-      <div class="card">
-        <div class="card-title">
-          <span>🔍</span> Search & Filter Leads
+      <!-- Executive Analytics KPI Dashboard -->
+      <div class="kpi-grid">
+        <div class="kpi-card" style="border-left: 4px solid #16A34A;">
+          <div class="kpi-label">Win Rate</div>
+          <div class="kpi-value" id="kpiWinRate" style="color: #16A34A;">0%</div>
+          <div class="kpi-sub">Converted vs Total</div>
         </div>
-        <div class="form-group">
-          <input type="text" class="form-input" id="searchLeadsInput" placeholder="Search by name, phone or product..." oninput="renderLeads()">
+        <div class="kpi-card" style="border-left: 4px solid var(--primary);">
+          <div class="kpi-label">Total Leads</div>
+          <div class="kpi-value" id="kpiTotalLeads">0</div>
+          <div class="kpi-sub">Authorized Scope</div>
+        </div>
+        <div class="kpi-card" style="border-left: 4px solid #D97706;">
+          <div class="kpi-label">Active Pipeline</div>
+          <div class="kpi-value" id="kpiActivePipeline" style="color: #D97706;">0</div>
+          <div class="kpi-sub">New / Contact / F-Up</div>
+        </div>
+        <div class="kpi-card" style="border-left: 4px solid #7E22CE;">
+          <div class="kpi-label">Converted (Won)</div>
+          <div class="kpi-value" id="kpiConverted" style="color: #7E22CE;">0</div>
+          <div class="kpi-sub">Disbursed / Opened</div>
+        </div>
+        <div class="kpi-card" style="border-left: 4px solid #64748B;">
+          <div class="kpi-label">Lost / Declined</div>
+          <div class="kpi-value" id="kpiLost" style="color: #64748B;">0</div>
+          <div class="kpi-sub">Closed</div>
+        </div>
+      </div>
+
+      <!-- Search & Branch Supervisor Monitoring Card -->
+      <div class="card" style="margin-bottom: 14px;">
+        <div class="card-title">
+          <span class="card-title-left"><span>🔍</span> Search &amp; Branch Supervisor Monitoring</span>
+          <div style="display: flex; gap: 6px;">
+            <button type="button" class="btn btn-outline btn-sm" style="width: auto;" onclick="exportFilteredLeadsCsv()">📥 Export CSV</button>
+            <button type="button" class="btn btn-success btn-sm" style="width: auto;" onclick="manualSync()">🔄 Sync</button>
+          </div>
         </div>
 
-        <!-- Dual Filters: Branch and Status -->
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label" for="branchFilterSelect">🏢 Branch Filter</label>
-            <select class="form-select" id="branchFilterSelect" onchange="renderLeads()">
-              <option value="All">All Branches</option>
-            </select>
+        <div class="form-row stack-xs" style="margin-bottom: 10px;">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="searchLeadsInput">Search Customer / Phone / Product / Officer</label>
+            <input type="text" class="form-input" id="searchLeadsInput" placeholder="Search leads..." oninput="renderLeads()">
           </div>
-          <div class="form-group">
+          <div class="form-group" style="margin-bottom: 0;">
             <label class="form-label" for="statusFilterSelect">Status Filter</label>
             <select class="form-select" id="statusFilterSelect" onchange="renderLeads()">
               <option value="All">All Statuses</option>
@@ -246,115 +414,352 @@
           </div>
         </div>
 
-        <div class="btn-group">
-          <button type="button" class="btn btn-success" onclick="manualSync()" style="height: 42px;">
-            🔄 Sync Google Sheet & Firestore
-          </button>
+        <!-- Authorized Branch Supervisor Filter -->
+        <div style="background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;">
+            <label class="form-label" for="supervisorBranchInput" style="margin-bottom: 0;">🛡️ Branch Supervisor Filter (BM / AM / RM Rights)</label>
+            <button type="button" class="btn btn-soft btn-sm" id="toggleMyBranchBtn" style="width: auto; min-height: 30px; height: 30px; font-size: 0.72rem;" onclick="toggleMyBranchFilter()">Filter My Branch</button>
+          </div>
+          <input type="text" class="form-input" id="supervisorBranchInput" placeholder="Type authorized branch name (e.g. Peshawar) to view all branch officers' leads..." oninput="renderLeads()">
+          <div id="supervisorAccessStatus" style="font-size: 0.74rem; font-weight: 700; margin-top: 6px; color: var(--text-muted);"></div>
         </div>
       </div>
 
-      <div id="leadsListContainer">
-        <!-- Populated via JS -->
-      </div>
+      <!-- Folded / Expandable Lead Cards -->
+      <div id="leadsListContainer"></div>
     </section>
 
-    <!-- TAB 3: SETTINGS -->
-    <section class="tab-content" id="settingsTab">
-      <!-- Google Account & Access Status Card -->
-      <div class="card">
-        <div class="card-title">
-          <span>🔐</span> Google Sign-In & Security Access
-        </div>
-        <div class="result-row">
-          <span>Signed-In Email:</span>
-          <strong id="settingsUserEmail">Not signed in</strong>
-        </div>
-        <div class="result-row">
-          <span>Access Status:</span>
-          <strong id="settingsAccessStatus" style="color: var(--success);">Local Guest Mode</strong>
-        </div>
-        <div class="result-row">
-          <span>User Role:</span>
-          <strong id="settingsUserRole">Loan Officer</strong>
-        </div>
-        <div class="btn-group" style="margin-top: 10px; flex-direction: column; align-items: stretch; gap: 8px;">
-          <div id="gisSettingsSlot" style="display: flex; justify-content: center;"></div>
-          <button type="button" class="btn btn-outline" id="settingsAuthBtn" onclick="toggleAuthAction()">🔑 Sign In with Google</button>
-        </div>
-      </div>
-
-      <!-- Officer Profile Card -->
-      <div class="card">
-        <div class="card-title">
-          <span>👤</span> Officer Profile & Branch
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label" for="settingsOfficerName">Officer Name</label>
-            <input type="text" class="form-input" id="settingsOfficerName" placeholder="Anjum Naveed">
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="settingsStaffId">Staff / Officer ID</label>
-            <input type="text" class="form-input" id="settingsStaffId" placeholder="RM-8433">
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="settingsBranch">Assigned Branch</label>
-          <input type="text" class="form-input" id="settingsBranch" placeholder="Peshawar Branch">
-        </div>
-        <button type="button" class="btn btn-primary" onclick="saveSettings()">Save Profile & Sync to Cloud</button>
-      </div>
-
-      <!-- Products Management & Firestore Sync Card -->
-      <div class="card">
-        <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-          <span>🏷️ Bank Products & Rate Configuration</span>
-          <button type="button" class="btn btn-accent" onclick="openNewProductModal()" style="height: 32px; font-size: 0.75rem; padding: 0 10px; width: auto;">➕ New Product</button>
-        </div>
-        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
-          All changes here write directly to Firestore (<code style="background: #E2E8F0; padding: 2px 4px; border-radius: 4px;">products</code> collection) and auto-sync in real-time across both Android and Web apps.
+    <!-- ========================================================== -->
+    <!-- TAB 3: PASSWORD-LOCKED ADMIN & SLABS CONSOLE               -->
+    <!-- ========================================================== -->
+    <section class="tab-content" id="adminTab">
+      <!-- Admin Password Gate -->
+      <div class="card" id="adminLockScreen" style="max-width: 460px; margin: 24px auto; text-align: center; padding: 26px 20px;">
+        <div style="font-size: 2.6rem; margin-bottom: 8px;">🔐</div>
+        <h2 style="font-size: 1.15rem; font-weight: 900; color: var(--primary); margin-bottom: 6px;">Admin &amp; Slabs Protected</h2>
+        <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 16px; line-height: 1.5;">
+          ایڈمن پینل کھولنے کے لیے فائر اسٹور میں سیو شدہ ایڈمن پاسورڈ درج کریں۔
         </p>
-        <div id="productsManageList">
-          <!-- Populated dynamically via Firestore -->
+        <div class="form-group" style="text-align: left;">
+          <label class="form-label" for="adminPinInput">Admin Password</label>
+          <input type="password" class="form-input" id="adminPinInput" placeholder="Enter Admin Password" onkeydown="if(event.key==='Enter') unlockAdminPanel()">
         </div>
+        <div id="adminPinError" style="display: none; color: var(--danger); font-size: 0.8rem; font-weight: 700; margin-bottom: 10px;"></div>
+        <button type="button" class="btn btn-primary" onclick="unlockAdminPanel()">🔓 Unlock Admin Console</button>
       </div>
 
-      <!-- Google Sheets Webhook Integration Card -->
-      <div class="card">
-        <div class="card-title">
-          <span>🔗</span> Google Sheets Webhook Integration
+      <!-- Unlocked 9-Card Admin Workspace -->
+      <div id="adminUnlockedContent" style="display: none;">
+        <div class="card" style="margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <div>
+            <div style="font-size: 0.96rem; font-weight: 900; color: var(--success);">🔓 Admin Console Active (Synced with Firestore)</div>
+            <div style="font-size: 0.76rem; color: var(--text-muted);">Tap any card below to expand and configure settings globally across Android &amp; Web.</div>
+          </div>
+          <button type="button" class="btn btn-danger btn-sm" style="width: auto;" onclick="lockAdminPanel()">🔒 Lock Admin Session</button>
         </div>
-        <div class="form-group">
-          <label class="form-label" for="settingsWebhookUrl">Google Apps Script Web App URL</label>
-          <input type="url" class="form-input" id="settingsWebhookUrl" placeholder="https://script.google.com/macros/s/.../exec">
-          <small style="color: var(--text-muted); font-size: 0.75rem; display: block; margin-top: 4px;">
-            Same Google Sheets Webhook URL used by the Android app. Dual-key upsert ensures in-place row updating.
-          </small>
-        </div>
-        <div class="btn-group">
-          <button type="button" class="btn btn-outline" onclick="testConnection()">⚡ Test Connection</button>
-          <button type="button" class="btn btn-accent" onclick="manualSync()">🔄 Push / Pull Sync</button>
-        </div>
-      </div>
 
-      <!-- Offline Cache & Data Management Card -->
-      <div class="card">
-        <div class="card-title">
-          <span>💾</span> Offline Cache & Data Management
-        </div>
-        <div class="result-row">
-          <span>Total Saved Leads in Browser:</span>
-          <strong id="statTotalLeads">0</strong>
-        </div>
-        <div class="result-row">
-          <span>Pending Sync to Google Sheet:</span>
-          <strong id="statPendingSync">0</strong>
-        </div>
-        <div class="btn-group" style="margin-top: 14px;">
-          <button type="button" class="btn btn-outline" onclick="exportLeadsJson()">📥 Backup Leads (JSON)</button>
+        <div class="admin-cards-grid">
+          <!-- CARD 1: THEME & DISPLAY APPEARANCE -->
+          <div class="admin-card" id="adminCardTheme">
+            <button type="button" class="admin-card-header" onclick="toggleAdminCard('adminCardTheme')">
+              <div>
+                <div class="admin-card-title">🎨 Theme &amp; Display Appearance</div>
+                <div class="admin-card-sub">Switch display mode between Light, Dark, or System Auto</div>
+              </div>
+              <span class="admin-chevron">Expand ▾</span>
+            </button>
+            <div class="admin-card-body">
+              <div class="chip-row">
+                <button type="button" class="chip-btn" id="themeBtnLight" onclick="setAppTheme('light')" style="flex: 1;">☀️ Light</button>
+                <button type="button" class="chip-btn" id="themeBtnDark" onclick="setAppTheme('dark')" style="flex: 1;">🌙 Dark</button>
+                <button type="button" class="chip-btn" id="themeBtnSystem" onclick="setAppTheme('system')" style="flex: 1;">📱 Auto</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- CARD 2: GOOGLE SHEETS LIVE LEADS INTEGRATION -->
+          <div class="admin-card" id="adminCardSheets">
+            <button type="button" class="admin-card-header" onclick="toggleAdminCard('adminCardSheets')">
+              <div>
+                <div class="admin-card-title">📊 Google Sheets Live Leads Integration</div>
+                <div class="admin-card-sub" id="adminSheetsSubtitle">Configure Google Apps Script Web App URL</div>
+              </div>
+              <span class="admin-chevron">Expand ▾</span>
+            </button>
+            <div class="admin-card-body">
+              <div class="form-group">
+                <label class="form-label" for="adminWebhookUrl">Google Apps Script Web App URL</label>
+                <input type="url" class="form-input" id="adminWebhookUrl" placeholder="https://script.google.com/macros/s/.../exec">
+              </div>
+              <div class="btn-group">
+                <button type="button" class="btn btn-success btn-sm" onclick="adminSaveSheetsUrl()">💾 Save &amp; Sync URL</button>
+                <button type="button" class="btn btn-outline btn-sm" onclick="testConnection(document.getElementById('adminWebhookUrl').value)">⚡ Test</button>
+              </div>
+              <button type="button" class="btn btn-soft btn-sm" style="margin-top: 8px;" onclick="openModal('scriptGuideModal')">📋 View &amp; Copy Apps Script Code (v2.2)</button>
+            </div>
+          </div>
+
+          <!-- CARD 3: ADMIN & SOC SLABS CONFIGURATION (PASSWORD + LOCK) -->
+          <div class="admin-card" id="adminCardSecurity">
+            <button type="button" class="admin-card-header" onclick="toggleAdminCard('adminCardSecurity')">
+              <div>
+                <div class="admin-card-title">🔐 Admin &amp; SOC Slabs Configuration</div>
+                <div class="admin-card-sub">Change synced Admin password &amp; manage admin session lock</div>
+              </div>
+              <span class="admin-chevron">Expand ▾</span>
+            </button>
+            <div class="admin-card-body">
+              <div class="form-group">
+                <label class="form-label" for="oldAdminPinInput">Current Admin Password</label>
+                <input type="password" class="form-input" id="oldAdminPinInput" placeholder="Current password">
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label" for="newAdminPinInput">New Password</label>
+                  <input type="password" class="form-input" id="newAdminPinInput" placeholder="New password">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="confirmAdminPinInput">Confirm Password</label>
+                  <input type="password" class="form-input" id="confirmAdminPinInput" placeholder="Confirm">
+                </div>
+              </div>
+              <div class="btn-group">
+                <button type="button" class="btn btn-primary btn-sm" onclick="adminUpdatePassword()">🔑 Update Password in Firestore</button>
+                <button type="button" class="btn btn-outline btn-sm" onclick="lockAdminPanel()">🔒 Lock Now</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- CARD 4: GLOBAL FED & DEPOSIT TAX RATES (WHT) -->
+          <div class="admin-card" id="adminCardTax">
+            <button type="button" class="admin-card-header" onclick="toggleAdminCard('adminCardTax')">
+              <div>
+                <div class="admin-card-title">🏛️ Global FED &amp; Deposit Tax Rates (WHT)</div>
+                <div class="admin-card-sub" id="adminTaxSubtitle">FED: 16% • Filer WHT: 20% • Non-Filer WHT: 40%</div>
+              </div>
+              <span class="admin-chevron">Expand ▾</span>
+            </button>
+            <div class="admin-card-body">
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label" for="adminFedRate">FED Rate (%)</label>
+                  <input type="number" step="0.1" class="form-input" id="adminFedRate">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="adminCurrency">Currency</label>
+                  <input type="text" class="form-input" id="adminCurrency" value="PKR">
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label" for="adminFilerTaxRate">Filer WHT (%)</label>
+                  <input type="number" step="0.1" class="form-input" id="adminFilerTaxRate">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="adminNonFilerTaxRate">Non-Filer WHT (%)</label>
+                  <input type="number" step="0.1" class="form-input" id="adminNonFilerTaxRate">
+                </div>
+              </div>
+              <button type="button" class="btn btn-primary btn-sm" onclick="adminSaveTaxAndFedConfig()">💾 Save &amp; Sync Tax Rates Globally</button>
+            </div>
+          </div>
+
+          <!-- CARD 5: ADMIN BROADCAST NOTICE (ALL BRANCH USERS) -->
+          <div class="admin-card" id="adminCardBroadcast">
+            <button type="button" class="admin-card-header" onclick="toggleAdminCard('adminCardBroadcast')">
+              <div>
+                <div class="admin-card-title">📢 Admin Broadcast Notice (All Branch Users)</div>
+                <div class="admin-card-sub">Publish official SOC or policy announcements requiring acknowledgment</div>
+              </div>
+              <span class="admin-chevron">Expand ▾</span>
+            </button>
+            <div class="admin-card-body">
+              <div class="form-group">
+                <label class="form-label" for="adminBroadcastInput">Official Announcement Message</label>
+                <textarea class="form-textarea" id="adminBroadcastInput" placeholder="Enter official SOC update or policy notice for all branch officers..."></textarea>
+              </div>
+              <div class="btn-group">
+                <button type="button" class="btn btn-primary btn-sm" onclick="adminPublishBroadcast()">📢 Publish Broadcast</button>
+                <button type="button" class="btn btn-outline btn-sm" onclick="adminClearBroadcast()">🗑️ Clear Notice</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- CARD 6: APP UPDATE & FORCE UPGRADE LINK -->
+          <div class="admin-card" id="adminCardUpdate">
+            <button type="button" class="admin-card-header" onclick="toggleAdminCard('adminCardUpdate')">
+              <div>
+                <div class="admin-card-title">📲 App Update &amp; Force Upgrade</div>
+                <div class="admin-card-sub" id="adminUpdateSubtitle">Publish APK or Web update notice link</div>
+              </div>
+              <span class="admin-chevron">Expand ▾</span>
+            </button>
+            <div class="admin-card-body">
+              <div class="form-group">
+                <label class="form-label" for="adminUpdateUrlInput">Download / Upgrade URL</label>
+                <input type="url" class="form-input" id="adminUpdateUrlInput" placeholder="https://...">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="adminUpdateMsgInput">Release Notes / Message</label>
+                <input type="text" class="form-input" id="adminUpdateMsgInput" placeholder="e.g. Updated SOC Slabs v2.5">
+              </div>
+              <div class="btn-group">
+                <button type="button" class="btn btn-primary btn-sm" onclick="adminPublishAppUpdate()">🚀 Publish Update</button>
+                <button type="button" class="btn btn-outline btn-sm" onclick="adminClearAppUpdate()">Clear</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- CARD 7: LOAN FACILITIES & SLABS -->
+          <div class="admin-card admin-card-wide" id="adminCardProducts">
+            <button type="button" class="admin-card-header" onclick="toggleAdminCard('adminCardProducts')">
+              <div>
+                <div class="admin-card-title">💼 Loan Facilities &amp; Slabs (<span id="adminProdCount">0</span>)</div>
+                <div class="admin-card-sub">Design Asset &amp; Liability products, tiered rate/fee slabs, and bulk import/export</div>
+              </div>
+              <span class="admin-chevron">Expand ▾</span>
+            </button>
+            <div class="admin-card-body">
+              <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;">
+                <button type="button" class="btn btn-primary btn-sm" style="width: auto;" onclick="openNewProductModal('asset')">➕ Asset Facility (لون)</button>
+                <button type="button" class="btn btn-teal btn-sm" style="width: auto;" onclick="openNewProductModal('liability')">➕ Liability (ڈپازٹ)</button>
+                <button type="button" class="btn btn-outline btn-sm" style="width: auto;" onclick="exportProductsJson()">📥 Export JSON</button>
+                <button type="button" class="btn btn-outline btn-sm" style="width: auto;" onclick="openModal('bulkImportModal')">📤 Import JSON</button>
+              </div>
+              <div class="form-row stack-xs" style="margin-bottom: 10px;">
+                <div class="chip-row">
+                  <button type="button" class="chip-btn active" id="adminProdCatAll" onclick="setAdminProductFilter('all')">All</button>
+                  <button type="button" class="chip-btn" id="adminProdCatAsset" onclick="setAdminProductFilter('asset')">Asset</button>
+                  <button type="button" class="chip-btn" id="adminProdCatLiab" onclick="setAdminProductFilter('liability')">Liability</button>
+                </div>
+                <input type="text" class="form-input" id="adminProdSearchInput" placeholder="Search facilities..." oninput="renderAdminProductsList()">
+              </div>
+              <div id="adminProductsList"></div>
+            </div>
+          </div>
+
+          <!-- CARD 8: USER ACCESS & BRANCH RIGHTS -->
+          <div class="admin-card admin-card-wide" id="adminCardUsers">
+            <button type="button" class="admin-card-header" onclick="toggleAdminCard('adminCardUsers')">
+              <div>
+                <div class="admin-card-title">👥 User Access &amp; Branch Rights (<span id="adminUsersCount">0</span>)</div>
+                <div class="admin-card-sub">Allow/Block Officers &amp; RMs, assign authorized supervisor branch rights</div>
+              </div>
+              <span class="admin-chevron">Expand ▾</span>
+            </button>
+            <div class="admin-card-body">
+              <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;">
+                <input type="text" class="form-input" id="adminUserSearchInput" style="flex: 1; min-width: 200px;" placeholder="Search name, role, staff code, branch, or email..." oninput="renderAdminUsersList()">
+                <button type="button" class="btn btn-primary btn-sm" style="width: auto;" onclick="openEditUserAccessModal(null)">➕ Add User</button>
+                <button type="button" class="btn btn-outline btn-sm" style="width: auto;" onclick="refreshAdminUsersFromFirestore()">🔄 Refresh</button>
+              </div>
+              <div id="adminUsersList"></div>
+            </div>
+          </div>
+
+          <!-- CARD 9: LEAD DATABASE MANAGEMENT -->
+          <div class="admin-card admin-card-wide" id="adminCardLeadsDb">
+            <button type="button" class="admin-card-header" onclick="toggleAdminCard('adminCardLeadsDb')">
+              <div>
+                <div class="admin-card-title">🗑️ Lead Database Management (<span id="adminLeadsDbCount">0</span>)</div>
+                <div class="admin-card-sub">Filter all branch leads, export CSV, delete selected or clear records</div>
+              </div>
+              <span class="admin-chevron">Expand ▾</span>
+            </button>
+            <div class="admin-card-body">
+              <div class="form-row stack-xs" style="margin-bottom: 10px;">
+                <input type="text" class="form-input" id="adminLeadSearchInput" placeholder="Search branch, officer, customer..." oninput="renderAdminLeadsDbList()">
+                <select class="form-select" id="adminLeadBranchSelect" onchange="renderAdminLeadsDbList()">
+                  <option value="All">All Branches</option>
+                </select>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;">
+                <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 700; cursor: pointer;">
+                  <input type="checkbox" id="adminSelectAllLeadsChk" onchange="toggleAdminSelectAllLeads(this.checked)">
+                  <span id="adminSelectedLeadsLabel">Select All Filtered</span>
+                </label>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                  <button type="button" class="btn btn-outline btn-sm" style="width: auto;" onclick="exportAdminFilteredLeadsCsv()">📥 Export CSV</button>
+                  <button type="button" class="btn btn-danger btn-sm" style="width: auto;" onclick="adminDeleteSelectedLeads()">🗑 Delete Selected</button>
+                  <button type="button" class="btn btn-danger btn-sm" style="width: auto;" onclick="adminDeleteAllLeads()">⚠️ Delete All</button>
+                </div>
+              </div>
+              <div id="adminLeadsManageList"></div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
+
+    <!-- ========================================================== -->
+    <!-- TAB 4: OFFICER PROFILE & SYNC SETTINGS                     -->
+    <!-- ========================================================== -->
+    <section class="tab-content" id="settingsTab">
+      <div class="admin-cards-grid">
+        <div class="card">
+          <div class="card-title"><span class="card-title-left"><span>🔐</span> Google Account &amp; Access</span></div>
+          <div class="result-row">
+            <span>Signed-In Email:</span>
+            <strong id="settingsUserEmail">Not signed in</strong>
+          </div>
+          <div class="result-row">
+            <span>Access Status:</span>
+            <strong id="settingsAccessStatus" style="color: var(--success);">Local Guest Mode</strong>
+          </div>
+          <div class="result-row">
+            <span>Role / Supervisor Scope:</span>
+            <strong id="settingsUserRole">Loan Officer</strong>
+          </div>
+          <div class="btn-group" style="flex-direction: column; align-items: stretch;">
+            <div id="gisSettingsSlot" style="display: flex; justify-content: center;"></div>
+            <button type="button" class="btn btn-outline" id="settingsAuthBtn" onclick="toggleAuthAction()">🔑 Sign In with Google</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title"><span class="card-title-left"><span>👤</span> Officer Profile &amp; Branch</span></div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="settingsOfficerName">Officer Name</label>
+              <input type="text" class="form-input" id="settingsOfficerName" placeholder="Anjum Naveed">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="settingsStaffId">Staff / Officer ID</label>
+              <input type="text" class="form-input" id="settingsStaffId" placeholder="RM-8433">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="settingsBranch">Assigned Branch</label>
+            <input type="text" class="form-input" id="settingsBranch" placeholder="Main Branch">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="settingsWebhookUrl">Google Sheets Webhook URL (Optional Override)</label>
+            <input type="url" class="form-input" id="settingsWebhookUrl" placeholder="https://script.google.com/macros/s/.../exec">
+          </div>
+          <button type="button" class="btn btn-primary" onclick="saveSettings()">💾 Save Profile &amp; Sync to Cloud</button>
+        </div>
+
+        <div class="card admin-card-wide">
+          <div class="card-title"><span class="card-title-left"><span>💾</span> Offline Cache &amp; Backup</span></div>
+          <div class="result-row">
+            <span>Total Saved Leads in Browser:</span>
+            <strong id="statTotalLeads">0</strong>
+          </div>
+          <div class="result-row">
+            <span>Pending Sync to Google Sheet:</span>
+            <strong id="statPendingSync">0</strong>
+          </div>
+          <div class="btn-group">
+            <button type="button" class="btn btn-outline" onclick="exportLeadsJson()">📥 Backup All Leads (JSON)</button>
+            <button type="button" class="btn btn-success" onclick="manualSync()">🔄 Sync Now</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================== -->
+    <!-- MODALS                                                     -->
+    <!-- ========================================================== -->
 
     <!-- MODAL 1: CUSTOMER APPROACH TRACK RECORD -->
     <div class="modal-overlay" id="trackRecordModal">
@@ -364,7 +769,7 @@
           <button type="button" class="modal-close" onclick="closeModal('trackRecordModal')">&times;</button>
         </div>
         <div class="modal-body">
-          <div id="trackRecordCustomerHeader" style="margin-bottom: 12px; font-size: 0.85rem; color: var(--text-muted);"></div>
+          <div id="trackRecordCustomerHeader" style="margin-bottom: 12px; font-size: 0.84rem; color: var(--text-muted);"></div>
           <div id="trackRecordList"></div>
         </div>
       </div>
@@ -374,7 +779,7 @@
     <div class="modal-overlay" id="editNoteModal">
       <div class="modal-dialog">
         <div class="modal-header">
-          <div class="modal-title">📝 Edit Note / Comment</div>
+          <div class="modal-title">📝 Edit Lead Note</div>
           <button type="button" class="modal-close" onclick="closeModal('editNoteModal')">&times;</button>
         </div>
         <div class="modal-body">
@@ -382,7 +787,7 @@
             <label class="form-label" id="editNoteCustName"></label>
             <textarea class="form-textarea" id="editNoteTextarea" style="min-height: 120px;"></textarea>
           </div>
-          <button type="button" class="btn btn-primary" onclick="confirmSaveNote()">Save Note & Sync</button>
+          <button type="button" class="btn btn-primary" onclick="confirmSaveNote()">💾 Save Note &amp; Sync</button>
         </div>
       </div>
     </div>
@@ -391,38 +796,80 @@
     <div class="modal-overlay" id="followUpModal">
       <div class="modal-dialog">
         <div class="modal-header">
-          <div class="modal-title">📅 Schedule Follow-Up Date</div>
+          <div class="modal-title">📅 Schedule Follow-Up</div>
           <button type="button" class="modal-close" onclick="closeModal('followUpModal')">&times;</button>
         </div>
         <div class="modal-body">
           <div class="form-group">
-            <label class="form-label">Pick Date & Time</label>
+            <label class="form-label" for="followUpDateTimeInput">Pick Date &amp; Time</label>
             <input type="datetime-local" class="form-input" id="followUpDateTimeInput">
           </div>
           <div class="btn-group">
-            <button type="button" class="btn btn-primary" onclick="confirmScheduleFollowUp()">Schedule Follow-Up</button>
+            <button type="button" class="btn btn-primary" onclick="confirmScheduleFollowUp()">Schedule</button>
             <button type="button" class="btn btn-outline" onclick="confirmClearFollowUp()">Clear Date</button>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- MODAL 4: AMORTIZATION SCHEDULE -->
+    <!-- MODAL 4: INTERACTIVE AMORTIZATION & PREPAYMENT SCHEDULE -->
     <div class="modal-overlay" id="amortizationModal">
-      <div class="modal-dialog" style="max-width: 580px;">
+      <div class="modal-dialog modal-lg">
         <div class="modal-header">
-          <div class="modal-title">📋 Payment & Amortization Schedule</div>
-          <button type="button" class="modal-close" onclick="closeModal('amortizationModal')">&times;</button>
+          <div>
+            <div class="modal-title">📜 Repayment &amp; Prepayment Schedule</div>
+            <div id="amortHeaderSubtitle" style="font-size: 0.74rem; color: var(--text-muted);"></div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <button type="button" class="btn btn-outline btn-sm" id="resetExtrasBtn" style="width: auto; display: none;" onclick="clearAllExtraPayments()">🔄 Reset</button>
+            <button type="button" class="modal-close" onclick="closeModal('amortizationModal')">&times;</button>
+          </div>
         </div>
         <div class="modal-body">
+          <!-- Recalculation Strategy Mode Toggle -->
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;">
+            <div class="chip-row" style="flex: 1;">
+              <button type="button" class="chip-btn active" id="modeReduceEmiBtn" onclick="setPrepaymentMode('reduce_emi')" style="flex: 1;">📉 Reduce EMI (قسط کم کریں)</button>
+              <button type="button" class="chip-btn" id="modeReduceTenureBtn" onclick="setPrepaymentMode('reduce_tenure')" style="flex: 1;">⏳ Reduce Tenure (مدت کم کریں)</button>
+            </div>
+          </div>
+
+          <!-- Prepayment Savings Banner -->
+          <div id="prepaymentSummaryCard" class="dark-glass-card" style="margin-bottom: 10px; padding: 11px 13px;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; font-size: 0.78rem;">
+              <div>
+                <div style="color: #94A3B8;">Monthly EMI</div>
+                <strong id="amortSumEmi" class="tabular-nums" style="color: #FFFFFF; font-size: 0.92rem;">PKR 0</strong>
+              </div>
+              <div>
+                <div style="color: #94A3B8;">Tenure</div>
+                <strong id="amortSumTenure" class="tabular-nums" style="color: #FFFFFF; font-size: 0.92rem;">0M</strong>
+              </div>
+              <div>
+                <div style="color: #94A3B8;">Total Profit</div>
+                <strong id="amortSumProfit" class="tabular-nums" style="color: #FBBF24; font-size: 0.92rem;">PKR 0</strong>
+              </div>
+              <div>
+                <div style="color: #94A3B8;">Profit Saved</div>
+                <strong id="amortSumSaved" class="tabular-nums" style="color: #34D399; font-size: 0.92rem;">PKR 0</strong>
+              </div>
+            </div>
+          </div>
+
+          <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 6px;">
+            💡 کسی بھی قسط کی رو پر کلک کریں تو اب تک کی جمع شدہ رقم اور بقایا سیٹلمنٹ بیلنس نظر آئے گا۔ Extra Payment خانے میں رقم لکھ کر EMI یا مدت کم ہونے کا حساب دیکھیں۔
+          </div>
+
           <div class="table-wrapper">
             <table class="amort-table">
               <thead>
                 <tr>
                   <th>Mo</th>
-                  <th>EMI (PKR)</th>
+                  <th>Due</th>
                   <th>Principal</th>
                   <th>Profit</th>
+                  <th>Total EMI</th>
+                  <th>Extra Pay</th>
                   <th>Balance</th>
                 </tr>
               </thead>
@@ -430,32 +877,102 @@
             </table>
           </div>
         </div>
+        <div class="modal-footer">
+          <div class="dispatch-grid">
+            <button type="button" class="btn btn-whatsapp btn-sm" onclick="shareAmortizationWhatsApp(false)">💬 WhatsApp</button>
+            <button type="button" class="btn btn-sms btn-sm" onclick="shareAmortizationSMS()">✉️ SMS</button>
+            <button type="button" class="btn btn-copy btn-sm" onclick="shareAmortizationWhatsApp(true)">📋 Full Text</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick="printAmortizationPdf()">🖨️ Print PDF</button>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- MODAL 5: PRODUCT EDIT / CONFIGURE MODAL -->
-    <div class="modal-overlay" id="editProductModal">
-      <div class="modal-dialog" style="max-width: 540px;">
+    <!-- MODAL 5: CUMULATIVE INSTALLMENT BREAKDOWN / SETTLEMENT POPUP -->
+    <div class="modal-overlay" id="settlementModal" style="z-index: 140;">
+      <div class="modal-dialog">
         <div class="modal-header">
-          <div class="modal-title" id="editProductModalTitle">⚙️ Edit Product Configuration</div>
+          <div>
+            <div class="modal-title" id="settlementTitle">📊 Installment Settlement Summary</div>
+            <div id="settlementSubtitle" style="font-size: 0.74rem; color: var(--text-muted);"></div>
+          </div>
+          <button type="button" class="modal-close" onclick="closeModal('settlementModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+          <!-- Progress Bar -->
+          <div style="background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.78rem; font-weight: 700;">
+              <span>Principal Cleared</span>
+              <span id="settlePctText" style="color: var(--success);">0%</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" id="settleProgressBar" style="width: 0%;"></div>
+            </div>
+            <div id="settleTenureProgress" style="font-size: 0.72rem; color: var(--text-muted); text-align: right;"></div>
+          </div>
+
+          <!-- Paid So Far -->
+          <div style="background: var(--success-soft); border: 1px solid rgba(22,163,74,0.35); border-radius: 10px; padding: 11px 12px; margin-bottom: 10px;">
+            <div style="font-size: 0.8rem; font-weight: 800; color: var(--success); margin-bottom: 6px;">✅ Paid So Far (اب تک ادا شدہ رقم)</div>
+            <div class="result-row"><span>Principal Paid (پرنسپل):</span><strong id="settlePaidPrincipal" class="tabular-nums">PKR 0</strong></div>
+            <div class="result-row"><span>Profit Paid (پرافٹ):</span><strong id="settlePaidProfit" class="tabular-nums">PKR 0</strong></div>
+            <div class="result-row" id="settlePaidExtraRow"><span>Extra Payments (اضافی):</span><strong id="settlePaidExtra" class="tabular-nums">PKR 0</strong></div>
+            <div class="result-row highlight"><span>Total Paid (کل ادا شدہ):</span><strong id="settleTotalPaid" class="tabular-nums">PKR 0</strong></div>
+          </div>
+
+          <!-- Remaining Balance to Settle -->
+          <div style="background: var(--danger-soft); border: 1px solid rgba(220,38,38,0.35); border-radius: 10px; padding: 11px 12px; margin-bottom: 12px;">
+            <div style="font-size: 0.8rem; font-weight: 800; color: var(--danger); margin-bottom: 6px;">⚠️ Remaining Balance to Settle (بقایا واجب الادا)</div>
+            <div class="result-row"><span>Remaining Principal (بقایا اصل زر):</span><strong id="settleRemPrincipal" class="tabular-nums">PKR 0</strong></div>
+            <div class="result-row"><span>Remaining Profit (بقایا پرافٹ):</span><strong id="settleRemProfit" class="tabular-nums">PKR 0</strong></div>
+            <div class="result-row"><span>Remaining Months (بقایا اقساط):</span><strong id="settleRemMonths" class="tabular-nums">0</strong></div>
+            <div class="result-row highlight" style="color: var(--danger);"><span>Total Remaining Liability:</span><strong id="settleTotalRem" class="tabular-nums">PKR 0</strong></div>
+          </div>
+
+          <div class="dispatch-grid">
+            <button type="button" class="btn btn-whatsapp btn-sm" onclick="shareSettlementWhatsApp()">💬 WhatsApp</button>
+            <button type="button" class="btn btn-sms btn-sm" onclick="shareSettlementSMS()">✉️ SMS</button>
+            <button type="button" class="btn btn-copy btn-sm" onclick="copySettlementSummary()">📋 Copy</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick="printAmortizationPdf()">🖨️ Print PDF</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 6: SECURITY & COLLATERAL REQUIREMENTS -->
+    <div class="modal-overlay" id="collateralModal">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <div class="modal-title" id="collateralModalTitle">🛡️ Security &amp; Collateral Guide</div>
+          <button type="button" class="modal-close" onclick="closeModal('collateralModal')">&times;</button>
+        </div>
+        <div class="modal-body" id="collateralModalBody" style="font-size: 0.84rem; line-height: 1.5;"></div>
+      </div>
+    </div>
+
+    <!-- MODAL 7: FULL PRODUCT & SLABS EDITOR -->
+    <div class="modal-overlay" id="editProductModal">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-header">
+          <div class="modal-title" id="editProductModalTitle">⚙️ Edit Bank Product &amp; Slabs</div>
           <button type="button" class="modal-close" onclick="closeModal('editProductModal')">&times;</button>
         </div>
         <div class="modal-body">
           <input type="hidden" id="prodEditId">
           <div class="form-group">
-            <label class="form-label">Product Name</label>
+            <label class="form-label" for="prodEditName">Product Name</label>
             <input type="text" class="form-input" id="prodEditName" placeholder="e.g. KPF Gen Salary NonTrans-3138">
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Category</label>
+              <label class="form-label" for="prodEditCategory">Category</label>
               <select class="form-select" id="prodEditCategory">
                 <option value="asset">Asset (Loan)</option>
                 <option value="liability">Liability (Deposit)</option>
               </select>
             </div>
             <div class="form-group">
-              <label class="form-label">Pricing Type</label>
+              <label class="form-label" for="prodEditRateType">Pricing Type</label>
               <select class="form-select" id="prodEditRateType">
                 <option value="reducing">Reducing Balance</option>
                 <option value="flat">Flat Rate</option>
@@ -465,35 +982,68 @@
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Default Annual Rate (%)</label>
-              <input type="number" step="0.01" class="form-input" id="prodEditRate" placeholder="39.5">
+              <label class="form-label" for="prodEditRate">Default Annual Rate (%)</label>
+              <input type="number" step="0.01" class="form-input" id="prodEditRate">
             </div>
             <div class="form-group">
-              <label class="form-label">Processing Fee (%)</label>
-              <input type="number" step="0.01" class="form-input" id="prodEditFee" placeholder="1.5">
+              <label class="form-label" for="prodEditFee">Default Fee Value (%)</label>
+              <input type="number" step="0.01" class="form-input" id="prodEditFee">
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Min Amount (PKR)</label>
-              <input type="number" class="form-input" id="prodEditMinAmount" placeholder="50000">
+              <label class="form-label" for="prodEditMinAmount">Min Amount (PKR)</label>
+              <input type="number" class="form-input" id="prodEditMinAmount">
             </div>
             <div class="form-group">
-              <label class="form-label">Max Amount (PKR)</label>
-              <input type="number" class="form-input" id="prodEditMaxAmount" placeholder="500000">
+              <label class="form-label" for="prodEditMaxAmount">Max Amount (PKR)</label>
+              <input type="number" class="form-input" id="prodEditMaxAmount">
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Min Tenure (Mo)</label>
-              <input type="number" class="form-input" id="prodEditMinTenure" placeholder="3">
+              <label class="form-label" for="prodEditMinTenure">Min Tenure (Mo)</label>
+              <input type="number" class="form-input" id="prodEditMinTenure">
             </div>
             <div class="form-group">
-              <label class="form-label">Max Tenure (Mo)</label>
-              <input type="number" class="form-input" id="prodEditMaxTenure" placeholder="36">
+              <label class="form-label" for="prodEditMaxTenure">Max Tenure (Mo)</label>
+              <input type="number" class="form-input" id="prodEditMaxTenure">
             </div>
           </div>
-          <div class="btn-group" style="margin-top: 14px;">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="prodEditMinAge">Min Customer Age (Yrs)</label>
+              <input type="number" class="form-input" id="prodEditMinAge" value="21">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="prodEditMaxAge">Max Age at Maturity (Yrs)</label>
+              <input type="number" class="form-input" id="prodEditMaxAge" value="65">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="prodEditCollateral">Security &amp; Collateral / Terms Details</label>
+            <textarea class="form-textarea" id="prodEditCollateral" placeholder="Collateral requirements, eligibility notes, terms..."></textarea>
+          </div>
+
+          <!-- Tiered Rate Slabs Editor -->
+          <div style="background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin-bottom: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <strong style="font-size: 0.8rem;">📈 Tiered Rate Slabs (Min | Max | Rate %)</strong>
+              <button type="button" class="btn btn-outline btn-sm" style="width: auto; height: 28px; min-height: 28px;" onclick="addRateSlabRow()">+ Add Slab</button>
+            </div>
+            <div id="prodRateSlabsContainer"></div>
+          </div>
+
+          <!-- Tiered Fee Slabs Editor -->
+          <div style="background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin-bottom: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <strong style="font-size: 0.8rem;">🧾 Processing Fee Slabs (Min | Max | Type | Value | MinFee | MaxFee)</strong>
+              <button type="button" class="btn btn-outline btn-sm" style="width: auto; height: 28px; min-height: 28px;" onclick="addFeeSlabRow()">+ Add Slab</button>
+            </div>
+            <div id="prodFeeSlabsContainer"></div>
+          </div>
+
+          <div class="btn-group">
             <button type="button" class="btn btn-primary" onclick="confirmSaveProduct()">💾 Save to Firestore</button>
             <button type="button" class="btn btn-outline" onclick="closeModal('editProductModal')">Cancel</button>
           </div>
@@ -501,79 +1051,181 @@
       </div>
     </div>
 
-    <!-- MODAL 6: INSTALLATION GUIDE -->
+    <!-- MODAL 8: EDIT USER ACCESS & BRANCH RIGHTS -->
+    <div class="modal-overlay" id="editUserAccessModal">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <div class="modal-title" id="editUserModalTitle">👥 Edit User Access &amp; Branch Rights</div>
+          <button type="button" class="modal-close" onclick="closeModal('editUserAccessModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="editUserUid">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="editUserName">Officer Name</label>
+              <input type="text" class="form-input" id="editUserName">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="editUserStaffId">Staff ID</label>
+              <input type="text" class="form-input" id="editUserStaffId">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="editUserEmail">Email Address</label>
+            <input type="email" class="form-input" id="editUserEmail">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="editUserRole">Role</label>
+              <select class="form-select" id="editUserRole">
+                <option value="Loan Officer">Loan Officer</option>
+                <option value="Relationship Manager">Relationship Manager</option>
+                <option value="Branch Manager">Branch Manager</option>
+                <option value="Admin">Admin</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="editUserHomeBranch">Home Branch</label>
+              <input type="text" class="form-input" id="editUserHomeBranch" placeholder="e.g. Peshawar">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="editUserAllowedBranch">Allowed Supervisor Branch ("ALL" or Specific Branch Name)</label>
+            <input type="text" class="form-input" id="editUserAllowedBranch" placeholder="e.g. Peshawar or ALL">
+          </div>
+          <div class="toggle-wrapper">
+            <span style="font-size: 0.84rem; font-weight: 700;">Allow Branch Supervisor Monitoring Filter</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="editUserCanSupervisor" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="toggle-wrapper">
+            <span style="font-size: 0.84rem; font-weight: 700; color: var(--danger);">Block User Access (Deny Login)</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="editUserIsBlocked">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="btn-group">
+            <button type="button" class="btn btn-primary" onclick="confirmSaveUserAccess()">💾 Save Rights to Firestore</button>
+            <button type="button" class="btn btn-outline" onclick="closeModal('editUserAccessModal')">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 9: GOOGLE APPS SCRIPT GUIDE -->
+    <div class="modal-overlay" id="scriptGuideModal">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-header">
+          <div class="modal-title">📋 Google Apps Script Setup (v2.2 In-Place Upsert)</div>
+          <button type="button" class="modal-close" onclick="closeModal('scriptGuideModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 10px; line-height: 1.5;">
+            1. Open your Google Sheet ➔ <strong>Extensions &gt; Apps Script</strong>.<br>
+            2. Replace all existing code with the snippet below, Save, and click <strong>Deploy &gt; New Deployment (Web App, Access: Anyone)</strong>.
+          </p>
+          <pre id="appsScriptCodePre" style="background: #0F172A; color: #38BDF8; padding: 12px; border-radius: 8px; font-size: 0.74rem; max-height: 320px; overflow: auto;"></pre>
+          <div class="btn-group">
+            <button type="button" class="btn btn-success" onclick="copyAppsScriptCode()">📋 Copy Script Code</button>
+            <button type="button" class="btn btn-outline" onclick="closeModal('scriptGuideModal')">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 10: ADMIN BROADCAST NOTICE GATE -->
+    <div class="modal-overlay" id="broadcastNoticeModal" style="z-index: 200;">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <div class="modal-title">📢 Official Admin / SOC Update Notice</div>
+        </div>
+        <div class="modal-body">
+          <div id="broadcastModalMessage" style="background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 10px; padding: 14px; font-size: 0.9rem; line-height: 1.55; white-space: pre-wrap; margin-bottom: 14px;"></div>
+          <button type="button" class="btn btn-primary" onclick="acknowledgeAdminBroadcast()">✅ I Agree &amp; Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 11: BULK PRODUCT IMPORT -->
+    <div class="modal-overlay" id="bulkImportModal">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <div class="modal-title">📤 Bulk Import Products (JSON)</div>
+          <button type="button" class="modal-close" onclick="closeModal('bulkImportModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label" for="bulkImportTextarea">Paste Exported Products JSON Array</label>
+            <textarea class="form-textarea" id="bulkImportTextarea" style="min-height: 180px;" placeholder='[{"id":"prod-...", "name":"..."}]'></textarea>
+          </div>
+          <button type="button" class="btn btn-primary" onclick="confirmBulkImportProducts()">💾 Import &amp; Sync to Firestore</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 12: INSTALLATION GUIDE -->
     <div class="modal-overlay" id="installGuideModal">
       <div class="modal-dialog">
         <div class="modal-header">
           <div class="modal-title">📲 Install App to Home Screen</div>
           <button type="button" class="modal-close" onclick="closeModal('installGuideModal')">&times;</button>
         </div>
-        <div class="modal-body" style="font-size: 0.88rem; line-height: 1.5;">
+        <div class="modal-body" style="font-size: 0.86rem; line-height: 1.5;">
           <h4 style="color: var(--primary); margin-bottom: 6px;">🍎 iPhone (Apple iOS / Safari):</h4>
           <ol style="padding-left: 20px; margin-bottom: 14px;">
-            <li>Open this website in <strong>Safari</strong> on your iPhone.</li>
-            <li>Tap the <strong>Share</strong> button (box with upward arrow at bottom).</li>
-            <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
-            <li>Tap <strong>Add</strong> in the top-right corner. It will now launch like a native iPhone app and work offline!</li>
+            <li>Open this site in <strong>Safari</strong> on your iPhone.</li>
+            <li>Tap <strong>Share</strong> ➔ <strong>Add to Home Screen</strong> ➔ <strong>Add</strong>.</li>
           </ol>
-          <h4 style="color: var(--primary); margin-bottom: 6px;">🤖 Android (Google Chrome):</h4>
+          <h4 style="color: var(--primary); margin-bottom: 6px;">🤖 Android &amp; Desktop (Chrome / Edge):</h4>
           <ol style="padding-left: 20px;">
-            <li>Open this website in <strong>Chrome</strong>.</li>
-            <li>Tap the <strong>Three Dots</strong> (menu) in top right.</li>
-            <li>Tap <strong>Install App</strong> or <strong>Add to Home screen</strong>.</li>
+            <li>Open Menu / Address bar ➔ Click <strong>Install App</strong>.</li>
           </ol>
         </div>
       </div>
     </div>
 
-    <!-- MODAL 7: UNAUTHORIZED DOMAIN HELPER -->
+    <!-- MODAL 13: UNAUTHORIZED DOMAIN HELPER -->
     <div class="modal-overlay" id="unauthorizedDomainModal">
       <div class="modal-dialog">
         <div class="modal-header">
           <div class="modal-title" style="color: var(--danger);">🔐 Domain Authorization Required</div>
           <button type="button" class="modal-close" onclick="closeModal('unauthorizedDomainModal')">&times;</button>
         </div>
-        <div class="modal-body" style="font-size: 0.88rem; line-height: 1.55;">
-          <p style="margin-bottom: 10px; font-weight: 600; color: var(--text-main);">
-            برائے مہربانی اس ڈومین کو فائر بیس کنسول میں اتھورائزڈ لسٹ میں شامل کریں:
-          </p>
-          <div style="background: #F1F5F9; border: 1.5px solid #CBD5E1; border-radius: 8px; padding: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 14px;">
-            <code id="unauthorizedHostText" style="font-size: 0.84rem; color: var(--primary-dark); font-weight: 700; word-break: break-all;">github.io</code>
-            <button type="button" class="btn btn-primary" onclick="copyUnauthorizedHost()" style="width: auto; height: 34px; font-size: 0.78rem; padding: 0 12px;">📋 Copy</button>
+        <div class="modal-body" style="font-size: 0.86rem; line-height: 1.55;">
+          <p style="margin-bottom: 10px; font-weight: 600;">برائے مہربانی اس ڈومین کو فائر بیس کنسول میں اتھورائزڈ لسٹ میں شامل کریں:</p>
+          <div style="background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px;">
+            <code id="unauthorizedHostText" style="font-size: 0.84rem; font-weight: 700;">github.io</code>
+            <button type="button" class="btn btn-primary btn-sm" style="width: auto;" onclick="copyUnauthorizedHost()">📋 Copy</button>
           </div>
-          <ol style="padding-left: 20px; margin-bottom: 14px; color: var(--text-main);">
-            <li>Open <strong>Firebase Console</strong> (<code style="font-size: 0.78rem;">gen-lang-client-0150363642</code>).</li>
-            <li>Go to <strong>Build ➔ Authentication ➔ Settings</strong>.</li>
-            <li>Click <strong>Authorized domains ➔ Add domain</strong>.</li>
-            <li>Add <strong>github.io</strong> (or the copied domain above) and click <strong>Add</strong>.</li>
-          </ol>
           <button type="button" class="btn btn-primary" onclick="closeModal('unauthorizedDomainModal')">OK, Got It</button>
         </div>
       </div>
     </div>
-    <!-- MODAL 8: GOOGLE IDENTITY SERVICES SIGN-IN MODAL -->
+
+    <!-- MODAL 14: GOOGLE IDENTITY SERVICES SIGN-IN MODAL -->
     <div class="modal-overlay" id="googleSignInModal">
       <div class="modal-dialog">
         <div class="modal-header">
           <div class="modal-title">🔑 Sign In to KBL loan calculator</div>
           <button type="button" class="modal-close" onclick="closeModal('googleSignInModal')">&times;</button>
         </div>
-        <div class="modal-body" style="font-size: 0.88rem; line-height: 1.5; text-align: center;">
-          <p style="margin-bottom: 14px; color: var(--text-main);">
-            محفوظ گوگل سائن ان کے ذریعے اپنا آفیسر اکاؤنٹ منتخب کریں:
-          </p>
+        <div class="modal-body" style="font-size: 0.86rem; line-height: 1.5; text-align: center;">
+          <p style="margin-bottom: 14px;">محفوظ گوگل سائن ان کے ذریعے اپنا آفیسر اکاؤنٹ منتخب کریں:</p>
           <div id="gisModalSlot" style="display: flex; justify-content: center; margin-bottom: 14px; min-height: 44px;"></div>
-          <div style="background: #F8FAFC; border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: left; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 12px;">
-            <strong>Note for Admin / Setup:</strong>
-            If the Google button does not open, ensure <code id="gisOriginText" style="color: var(--primary-dark); font-weight: 700;"></code> is added under <em>Google Cloud Console ➔ Credentials ➔ Web Client ➔ Authorized JavaScript origins</em>.
+          <div style="background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: left; font-size: 0.76rem; color: var(--text-muted); margin-bottom: 12px;">
+            <strong>Setup Note:</strong> Ensure <code id="gisOriginText" style="font-weight: 700;"></code> is listed in <em>Google Cloud Console ➔ Credentials ➔ Web Client ➔ Authorized JavaScript origins</em>.
           </div>
-          <button type="button" class="btn btn-outline" onclick="signInWithFirebasePopupFallback()" style="font-size: 0.8rem; height: 38px;">
-            Alternative Sign-In (Backup)
-          </button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="signInWithFirebasePopupFallback()">Alternative Sign-In (Backup)</button>
         </div>
       </div>
     </div>
   </div>
+
+  <!-- PRINT-ONLY FORMATTED PDF AMORTIZATION & QUOTATION SHEET -->
+  <div id="printOnlySheet" class="print-only-sheet"></div>
 
   <!-- FIREBASE WEB MODULAR SDK BRIDGE (Supports Named Firestore Database) -->
   <script type="module">
@@ -598,6 +1250,9 @@
       getDocs,
       setDoc,
       deleteDoc,
+      deleteField,
+      arrayUnion,
+      arrayRemove,
       onSnapshot,
       serverTimestamp
     } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
@@ -650,6 +1305,9 @@
       getDocs: (colName) => getDocs(collection(db, colName)),
       setDoc: (colName, docId, data, merge = true) => setDoc(doc(db, colName, docId), data, { merge }),
       deleteDoc: (colName, docId) => deleteDoc(doc(db, colName, docId)),
+      deleteField: () => deleteField(),
+      arrayUnion: (...items) => arrayUnion(...items),
+      arrayRemove: (...items) => arrayRemove(...items),
       onCollectionSnapshot: (colName, onNext, onErr) => onSnapshot(collection(db, colName), onNext, onErr),
       onDocSnapshot: (colName, docId, onNext, onErr) => onSnapshot(doc(db, colName, docId), onNext, onErr),
       serverTimestamp: () => serverTimestamp()
@@ -658,6 +1316,8 @@
     window.dispatchEvent(new Event("firebase-bridge-ready"));
   </script>
 
+  <script src="./calc-engine.js"></script>
+  <script src="./admin-crm.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

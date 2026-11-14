@@ -1,8 +1,6 @@
 /**
- * KB Loan Calculator & Lead CRM - Standalone PWA Engine
- * Complete offline-first calculator, IndexedDB persistence, Firebase Auth (Google Sign-In),
- * real-time Firestore synchronization (Named DB parity with Android), branch filtering for iPhone/Web,
- * Allow/Deny user access control, WhatsApp/SMS quotations, and Google Sheets in-place sync.
+ * KB Loan Calculator & Lead CRM - Core Application, Firebase Sync, GIS Auth & Offline Engine
+ * Works in coordination with ./calc-engine.js and ./admin-crm.js
  */
 
 // 1. FIREBASE & GOOGLE IDENTITY SERVICES (GIS) BRIDGE STATE
@@ -16,12 +14,19 @@ let unsubscribeProducts = null;
 let unsubscribeLeads = null;
 let unsubscribeGlobalConfig = null;
 let unsubscribeUserDoc = null;
+let toastTimer = null;
 
 let globalConfig = {
   fedRate: 16.0,
   filerTaxRate: 20.0,
   nonFilerTaxRate: 40.0,
   currency: 'PKR',
+  adminPin: 'Admin123',
+  adminBroadcastMessage: '',
+  adminBroadcastId: '',
+  appUpdateUrl: '',
+  appUpdateId: '',
+  appUpdateMessage: '',
   googleSheetsWebhookUrl: '',
   registeredUsersMap: {},
   deletedUserKeys: []
@@ -29,7 +34,6 @@ let globalConfig = {
 
 // 2. BANK PRODUCTS CONFIGURATION (DEFAULT SEED & DYNAMIC FIRESTORE RECEPTACLE)
 let BANK_PRODUCTS = [
-  // ASSET LOAN PRODUCTS
   {
     id: "prod-kmbl-3136",
     category: "asset",
@@ -40,9 +44,13 @@ let BANK_PRODUCTS = [
     maxAmount: 500000,
     minTenure: 3,
     maxTenure: 36,
+    minAge: 21,
+    maxAgeAtMaturity: 65,
     tenures: [6, 12, 18, 24, 30, 36],
     feePercent: 1.5,
+    defaultFeeValue: 1.5,
     fedRate: 16.0,
+    collateralDetails: "Pension book verification, verifiable pension credit in KBL account, CNIC copy & promissory note.",
     rateSlabs: [],
     feeSlabs: [],
     tenureRates: {},
@@ -58,9 +66,13 @@ let BANK_PRODUCTS = [
     maxAmount: 500000,
     minTenure: 3,
     maxTenure: 36,
+    minAge: 21,
+    maxAgeAtMaturity: 60,
     tenures: [6, 12, 18, 24, 30, 36],
     feePercent: 1.5,
+    defaultFeeValue: 1.5,
     fedRate: 16.0,
+    collateralDetails: "Confirmed permanent employee salary certificate, 6-month bank statement, CNIC & employer deduction undertaking.",
     rateSlabs: [],
     feeSlabs: [],
     tenureRates: {},
@@ -76,9 +88,13 @@ let BANK_PRODUCTS = [
     maxAmount: 1000000,
     minTenure: 3,
     maxTenure: 24,
+    minAge: 21,
+    maxAgeAtMaturity: 65,
     tenures: [6, 12, 18, 24],
     feePercent: 1.5,
+    defaultFeeValue: 1.5,
     fedRate: 16.0,
+    collateralDetails: "Running business proof (minimum 1 year), business cashflow assessment, personal/third-party guarantee.",
     rateSlabs: [],
     feeSlabs: [],
     tenureRates: {},
@@ -94,9 +110,13 @@ let BANK_PRODUCTS = [
     maxAmount: 500000,
     minTenure: 3,
     maxTenure: 36,
+    minAge: 21,
+    maxAgeAtMaturity: 65,
     tenures: [6, 12, 18, 24, 30, 36],
     feePercent: 1.5,
+    defaultFeeValue: 1.5,
     fedRate: 16.0,
+    collateralDetails: "Business premises verification, valid CNIC, and promissory note per KBL SOC.",
     rateSlabs: [],
     feeSlabs: [],
     tenureRates: {},
@@ -112,16 +132,18 @@ let BANK_PRODUCTS = [
     maxAmount: 350000,
     minTenure: 6,
     maxTenure: 24,
+    minAge: 20,
+    maxAgeAtMaturity: 65,
     tenures: [6, 12, 18, 24],
     feePercent: 1.25,
+    defaultFeeValue: 1.25,
     fedRate: 16.0,
+    collateralDetails: "Personal guarantee and household cashflow evaluation.",
     rateSlabs: [],
     feeSlabs: [],
     tenureRates: {},
     liabilityPricingType: ""
   },
-
-  // LIABILITY DEPOSIT PRODUCTS
   {
     id: "prod-liab-tdr-1y",
     category: "liability",
@@ -132,13 +154,17 @@ let BANK_PRODUCTS = [
     maxAmount: 50000000,
     minTenure: 12,
     maxTenure: 12,
+    minAge: 18,
+    maxAgeAtMaturity: 99,
     tenures: [12],
     feePercent: 0,
+    defaultFeeValue: 0,
     fedRate: 0,
+    collateralDetails: "Valid CNIC, biometric verification, Filer/Non-Filer tax certificate; monthly profit payout.",
     rateSlabs: [],
     feeSlabs: [],
-    tenureRates: {},
-    liabilityPricingType: ""
+    tenureRates: { 12: 17.5 },
+    liabilityPricingType: "tenure"
   },
   {
     id: "prod-liab-tdr-3y",
@@ -150,13 +176,17 @@ let BANK_PRODUCTS = [
     maxAmount: 50000000,
     minTenure: 36,
     maxTenure: 36,
+    minAge: 18,
+    maxAgeAtMaturity: 99,
     tenures: [36],
     feePercent: 0,
+    defaultFeeValue: 0,
     fedRate: 0,
+    collateralDetails: "Term deposit certificate with early encashment schedule per KBL SOC.",
     rateSlabs: [],
     feeSlabs: [],
-    tenureRates: {},
-    liabilityPricingType: ""
+    tenureRates: { 36: 16.0 },
+    liabilityPricingType: "tenure"
   },
   {
     id: "prod-liab-pls-savings",
@@ -168,17 +198,21 @@ let BANK_PRODUCTS = [
     maxAmount: 100000000,
     minTenure: 1,
     maxTenure: 12,
+    minAge: 18,
+    maxAgeAtMaturity: 99,
     tenures: [1, 3, 6, 12],
     feePercent: 0,
+    defaultFeeValue: 0,
     fedRate: 0,
+    collateralDetails: "Profit calculated on monthly average balance; WHT applied per Filer/Non-Filer status.",
     rateSlabs: [],
     feeSlabs: [],
     tenureRates: {},
-    liabilityPricingType: ""
+    liabilityPricingType: "amount"
   }
 ];
 
-// 3. RECURSIVE DE-NESTING PAYLOAD SANITIZER (Standard JavaScript Regex)
+// 3. RECURSIVE DE-NESTING PAYLOAD SANITIZER
 function cleanRawActionPayload(raw) {
   if (!raw || typeof raw !== 'string') return '';
   let text = raw.trim();
@@ -274,13 +308,11 @@ class LocalDB {
   }
 }
 
-// 5. APPLICATION STATE & CONTROLLERS
-let currentCategory = 'asset';
+// 5. APPLICATION STATE & BOOTSTRAP
 let currentProduct = BANK_PRODUCTS[0];
 let currentEditingLeadId = null;
 let currentFollowUpLeadId = null;
 
-// Officer profile defaults
 let officerProfile = {
   officerName: 'Anjum Naveed',
   staffId: 'RM-8433',
@@ -288,27 +320,28 @@ let officerProfile = {
   webhookUrl: ''
 };
 
-// Initialize App
 window.addEventListener('DOMContentLoaded', async () => {
+  const savedTheme = await LocalDB.getSetting('themeMode', 'light');
+  applyThemeMode(savedTheme);
+
   await loadSettings();
   populateProducts();
   calculate();
   await renderLeads();
   updateOnlineStatus();
+  updateSettingsStats();
 
   if (window.FirebaseBridge) {
     initFirebaseAuthAndFirestore();
   }
   initGoogleIdentityServices();
 
-  // Register online/offline listeners
   window.addEventListener('online', () => {
     updateOnlineStatus();
-    manualSync();
+    manualSync(true);
   });
   window.addEventListener('offline', updateOnlineStatus);
 
-  // Register Service Worker for offline PWA
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').then(() => {
       console.log('PWA Service Worker registered');
@@ -316,7 +349,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
-// Wait for ES Module Firebase Bridge & GIS Script if they load after DOMContentLoaded
 window.addEventListener('firebase-bridge-ready', () => {
   initFirebaseAuthAndFirestore();
 });
@@ -330,7 +362,6 @@ function initFirebaseAuthAndFirestore() {
   fb = window.FirebaseBridge;
   firebaseInitialized = true;
 
-  // Handle redirect return if user signed in via redirect (e.g. iOS standalone PWA or popup blocked)
   fb.getRedirectResult().catch((err) => {
     if (err && err.code) {
       handleAuthError(err);
@@ -354,36 +385,35 @@ function initFirebaseAuthAndFirestore() {
       if (headerWrap) headerWrap.style.display = 'none';
       if (authBtn) authBtn.style.display = 'none';
       if (gisSettingsSlot) gisSettingsSlot.style.display = 'none';
-      chip.style.display = 'inline-flex';
-      nameSpan.textContent = user.displayName || (user.email ? user.email.split('@')[0] : 'Officer');
-      if (user.photoURL) {
-        avatarImg.src = user.photoURL;
+      if (chip) chip.style.display = 'inline-flex';
+      if (nameSpan) nameSpan.textContent = user.displayName || (user.email ? user.email.split('@')[0] : 'Officer');
+      if (user.photoURL && avatarImg) avatarImg.src = user.photoURL;
+      if (settingsEmail) settingsEmail.textContent = user.email || 'Google User';
+      if (settingsAuthBtn) {
+        settingsAuthBtn.style.display = 'inline-flex';
+        settingsAuthBtn.textContent = '🚪 Sign Out';
       }
-      settingsEmail.textContent = user.email || 'Google User';
-      settingsAuthBtn.style.display = 'inline-flex';
-      settingsAuthBtn.textContent = '🚪 Sign Out';
       closeModal('googleSignInModal');
 
-      // Start Global Config & Access Control Listeners
       startFirestoreGlobalConfigListener(user);
       startFirestoreUserListener(user);
-
-      // Verify Access immediately
       await verifyUserAccessAndSyncProfile(user);
-
-      // Start Real-Time Product & Lead Listeners
       startFirestoreProductsListener();
       startFirestoreLeadsListener();
     } else {
       if (headerWrap) headerWrap.style.display = 'inline-flex';
       if (gisSettingsSlot) gisSettingsSlot.style.display = 'flex';
-      chip.style.display = 'none';
-      settingsEmail.textContent = 'Not signed in';
-      settingsAuthBtn.style.display = 'inline-flex';
-      settingsAuthBtn.textContent = '🔑 Sign In with Google';
-      settingsStatus.textContent = 'Local Guest Mode';
-      settingsStatus.style.color = '#F59E0B';
-      settingsRole.textContent = 'Loan Officer';
+      if (chip) chip.style.display = 'none';
+      if (settingsEmail) settingsEmail.textContent = 'Not signed in';
+      if (settingsAuthBtn) {
+        settingsAuthBtn.style.display = 'inline-flex';
+        settingsAuthBtn.textContent = '🔑 Sign In with Google';
+      }
+      if (settingsStatus) {
+        settingsStatus.textContent = 'Local Guest Mode';
+        settingsStatus.style.color = '#F59E0B';
+      }
+      if (settingsRole) settingsRole.textContent = 'Loan Officer';
 
       renderGisButtons();
       hideAccessDeniedScreen();
@@ -407,6 +437,13 @@ function startFirestoreGlobalConfigListener(user) {
       globalConfig.filerTaxRate = Number(d.filerTaxRate) || 20.0;
       globalConfig.nonFilerTaxRate = Number(d.nonFilerTaxRate) || 40.0;
       globalConfig.currency = d.currency || 'PKR';
+      globalConfig.adminPin = d.adminPin || 'Admin123';
+      globalConfig.adminBroadcastMessage = d.adminBroadcastMessage || '';
+      globalConfig.adminBroadcastId = d.adminBroadcastId || '';
+      globalConfig.appUpdateUrl = d.appUpdateUrl || '';
+      globalConfig.appUpdateId = d.appUpdateId || '';
+      globalConfig.appUpdateMessage = d.appUpdateMessage || '';
+      globalConfig.googleSheetsWebhookUrl = d.googleSheetsWebhookUrl || '';
       globalConfig.registeredUsersMap = d.registeredUsersMap || {};
       globalConfig.deletedUserKeys = Array.isArray(d.deletedUserKeys) ? d.deletedUserKeys : [];
 
@@ -417,13 +454,13 @@ function startFirestoreGlobalConfigListener(user) {
         if (webhookInput) webhookInput.value = officerProfile.webhookUrl;
       }
 
-      const filerLabel = document.getElementById('filerToggleLabel');
-      if (filerLabel) {
-        filerLabel.textContent = `Active Tax Filer (${globalConfig.filerTaxRate}% Tax vs ${globalConfig.nonFilerTaxRate}% Non-Filer)`;
-      }
+      updateAppUpdateBanner();
+      checkAndShowBroadcastModal();
       calculate();
 
-      // Re-evaluate Allow/Deny whenever global registeredUsersMap updates from Android Admin panel
+      if (adminUnlocked) {
+        populateAdminControls();
+      }
       if (user) {
         await verifyUserAccessAndSyncProfile(user);
       }
@@ -444,7 +481,6 @@ function startFirestoreUserListener(user) {
   });
 }
 
-// Check Allow / Deny Whitelist (Matches Android FirestoreRepository.kt)
 async function verifyUserAccessAndSyncProfile(user) {
   if (!fb) return;
 
@@ -453,11 +489,9 @@ async function verifyUserAccessAndSyncProfile(user) {
       user.email && (user.email.toLowerCase().includes('vipanjum') || user.email.toLowerCase().includes('admin'))
     );
 
-    // 1. Check /users/{uid}
     const snap = await fb.getDoc('users', user.uid);
     let userRecord = snap.exists() ? snap.data() : null;
 
-    // 2. Also check /config/global -> registeredUsersMap (Android admin toggles write here too!)
     let globalRecord = null;
     try {
       const globalSnap = await fb.getDoc('config', 'global');
@@ -473,7 +507,6 @@ async function verifyUserAccessAndSyncProfile(user) {
       console.warn('Global registry read notice:', e);
     }
 
-    // Pick freshest record between /users/{uid} and /config/global.registeredUsersMap
     let effectiveRecord = userRecord;
     if (globalRecord && (!effectiveRecord || (Number(globalRecord.updatedAt) || 0) >= (Number(effectiveRecord.updatedAt) || 0))) {
       effectiveRecord = globalRecord;
@@ -492,12 +525,13 @@ async function verifyUserAccessAndSyncProfile(user) {
       if (effectiveRecord.officerName) officerProfile.officerName = effectiveRecord.officerName;
       if (effectiveRecord.staffId) officerProfile.staffId = effectiveRecord.staffId;
       if (effectiveRecord.branchName) officerProfile.branchName = effectiveRecord.branchName;
-      if (effectiveRecord.role) {
-        document.getElementById('settingsUserRole').textContent = effectiveRecord.role;
+
+      const roleEl = document.getElementById('settingsUserRole');
+      if (roleEl) {
+        const scope = effectiveRecord.allowedSupervisorBranch || effectiveRecord.branchName || 'Own Branch';
+        roleEl.textContent = `${effectiveRecord.role || 'Loan Officer'} (${effectiveRecord.canUseSupervisorFilter === false ? 'Personal Only' : scope})`;
       }
     } else {
-      // Brand new user: Admin is always allowed; new officers default to blocked (isBlocked: true)
-      // until Admin enables them in Firestore / Android Admin Panel (exact Android parity)
       const defaultRole = isPrimaryAdmin ? 'Admin' : 'Loan Officer';
       const defaultBlocked = !isPrimaryAdmin;
 
@@ -507,7 +541,7 @@ async function verifyUserAccessAndSyncProfile(user) {
         officerName: user.displayName || officerProfile.officerName || 'Loan Officer',
         staffId: officerProfile.staffId || ('RO-' + user.uid.substring(0, 4).toUpperCase()),
         branchName: officerProfile.branchName || 'Main Branch',
-        allowedSupervisorBranch: officerProfile.branchName || 'Main Branch',
+        allowedSupervisorBranch: isPrimaryAdmin ? 'ALL' : (officerProfile.branchName || 'Main Branch'),
         canUseSupervisorFilter: isPrimaryAdmin,
         isBlocked: defaultBlocked,
         role: defaultRole,
@@ -531,17 +565,19 @@ async function verifyUserAccessAndSyncProfile(user) {
       }
     }
 
-    // Refresh UI badges & settings inputs
     document.getElementById('officerBadge').textContent = `👤 Officer: ${officerProfile.officerName} (${officerProfile.staffId})`;
     document.getElementById('branchBadge').textContent = `🏢 ${officerProfile.branchName}`;
     document.getElementById('settingsOfficerName').value = officerProfile.officerName;
     document.getElementById('settingsStaffId').value = officerProfile.staffId;
     document.getElementById('settingsBranch').value = officerProfile.branchName;
 
-    document.getElementById('settingsAccessStatus').textContent = 'Authorized (Active)';
-    document.getElementById('settingsAccessStatus').style.color = '#16A34A';
+    const statusEl = document.getElementById('settingsAccessStatus');
+    if (statusEl) {
+      statusEl.textContent = 'Authorized (Active)';
+      statusEl.style.color = '#16A34A';
+    }
 
-    updateBranchFilterOptions();
+    renderLeads();
   } catch (err) {
     console.warn('Error verifying user access in Firestore:', err);
   }
@@ -551,8 +587,11 @@ function showAccessDeniedScreen(user) {
   document.getElementById('deniedUserEmail').textContent = user.email || 'User';
   document.getElementById('deniedUserUid').textContent = user.uid || '';
   document.getElementById('accessDeniedScreen').classList.add('active');
-  document.getElementById('settingsAccessStatus').textContent = 'Blocked / Inactive';
-  document.getElementById('settingsAccessStatus').style.color = '#EF4444';
+  const statusEl = document.getElementById('settingsAccessStatus');
+  if (statusEl) {
+    statusEl.textContent = 'Blocked / Inactive';
+    statusEl.style.color = '#EF4444';
+  }
 }
 
 function hideAccessDeniedScreen() {
@@ -576,23 +615,15 @@ function handleAuthError(err) {
     openModal('unauthorizedDomainModal');
     return;
   }
-  alert('Google Sign-In notice: ' + (err.message || err.code));
+  showToast('Google Sign-In notice: ' + (err.message || err.code));
 }
 
 function copyUnauthorizedHost() {
   const host = document.getElementById('unauthorizedHostText').textContent;
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(host).then(() => {
-      alert(`✅ Copied "${host}"! Now paste it in Firebase Console ➔ Authentication ➔ Settings ➔ Authorized domains.`);
-    }).catch(() => {
-      alert(`Domain to add: ${host}`);
-    });
-  } else {
-    alert(`Domain to add: ${host}`);
-  }
+  copyToClipboard(host, `✅ Copied "${host}"! Add it in Firebase Console ➔ Authorized domains.`);
 }
 
-// 6B. GOOGLE IDENTITY SERVICES (GIS) SIGN-IN (Shows "KBL loan calculator" instead of firebaseapp.com)
+// 6B. GOOGLE IDENTITY SERVICES (GIS) SIGN-IN
 function initGoogleIdentityServices() {
   if (gisInitialized) return;
   if (!window.google || !window.google.accounts || !window.google.accounts.id) return;
@@ -662,25 +693,25 @@ function renderGisButtons() {
 
 async function handleGoogleCredentialResponse(response) {
   if (!response || !response.credential) {
-    alert('Google Sign-In did not return a credential.');
+    showToast('Google Sign-In did not return a credential.');
     return;
   }
   if (!fb) {
-    alert('Firebase is still initializing. Please try again in a moment.');
+    showToast('Firebase is still initializing. Please try again.');
     return;
   }
   try {
     await fb.signInWithGoogleIdToken(response.credential);
     closeModal('googleSignInModal');
+    showToast('✅ Signed in successfully!');
   } catch (err) {
     handleAuthError(err);
   }
 }
 
-// Sign-In & Sign-Out Handlers
 async function signInWithGoogle() {
   if (!fb) {
-    alert('Firebase Auth is still initializing or the device is offline. Please wait a second and try again.');
+    showToast('Firebase Auth is still initializing. Please wait a second.');
     return;
   }
 
@@ -697,7 +728,6 @@ async function signInWithGoogle() {
     return;
   }
 
-  // Fallback if GIS script was blocked or offline
   await signInWithFirebasePopupFallback();
 }
 
@@ -732,7 +762,7 @@ async function signOutUser() {
     }
     await fb.signOut();
     hideAccessDeniedScreen();
-    alert('Logged out successfully.');
+    showToast('Signed out successfully.');
   } catch (err) {
     console.warn('Sign out error:', err);
   }
@@ -764,7 +794,9 @@ function startFirestoreProductsListener() {
         const maxAmount = Number(d.maxAmount) || 5000000;
         const minTenure = Number(d.minTenure) || 1;
         const maxTenure = Number(d.maxTenure) || 36;
-        const feePercent = Number(d.defaultFeeValue) || 1.5;
+        const minAge = Number(d.minAge) || 21;
+        const maxAgeAtMaturity = Number(d.maxAgeAtMaturity) || 65;
+        const feePercent = Number(d.defaultFeeValue) ?? Number(d.feePercent) ?? 1.5;
         const fedRate = Number(d.fedRate) || globalConfig.fedRate || 16.0;
         const rateSlabs = Array.isArray(d.rateSlabs) ? d.rateSlabs : [];
         const feeSlabs = Array.isArray(d.feeSlabs) ? d.feeSlabs : [];
@@ -794,9 +826,14 @@ function startFirestoreProductsListener() {
           maxAmount,
           minTenure,
           maxTenure,
+          minAge,
+          maxAgeAtMaturity,
           tenures: tenures.length > 0 ? tenures : [6, 12, 18, 24, 36],
+          feeType: d.feeType || 'percentage',
           feePercent,
+          defaultFeeValue: feePercent,
           fedRate,
+          collateralDetails: d.collateralDetails || '',
           rateSlabs,
           feeSlabs,
           tenureRates,
@@ -809,9 +846,9 @@ function startFirestoreProductsListener() {
         const previousId = currentProduct ? currentProduct.id : null;
         populateProducts(previousId);
         calculate();
-        renderProductsManagementList();
+        if (adminUnlocked) renderAdminProductsList();
         const badge = document.getElementById('firestoreProductSyncBadge');
-        if (badge) badge.textContent = `⚡ Firestore Synced (${fetched.length} Products)`;
+        if (badge) badge.textContent = `⚡ Synced (${fetched.length})`;
       }
     }
   }, (err) => {
@@ -819,7 +856,7 @@ function startFirestoreProductsListener() {
   });
 }
 
-// 8. REAL-TIME FIRESTORE LEADS SYNCHRONIZATION (WITH BRANCH FILTERING)
+// 8. REAL-TIME FIRESTORE LEADS SYNCHRONIZATION
 function startFirestoreLeadsListener() {
   if (!fb) return;
   if (unsubscribeLeads) unsubscribeLeads();
@@ -839,6 +876,10 @@ function startFirestoreLeadsListener() {
         id: leadId,
         customerName: d.customerName || 'Customer',
         mobile: d.mobile || '',
+        dob: d.dob || '',
+        age: Number(d.age) || 0,
+        monthlyIncome: Number(d.monthlyIncome) || 0,
+        dbrAllowed: Number(d.dbrAllowed) || 50,
         category: d.category || 'asset',
         productId: d.productId || '',
         productName: d.productName || 'Bank Facility',
@@ -847,6 +888,10 @@ function startFirestoreLeadsListener() {
         monthlyEmi: Number(d.monthlyEmi) || 0,
         totalProfit: Number(d.totalProfit) || 0,
         processingFee: Number(d.processingFee) || 0,
+        isFiler: d.isFiler !== false,
+        taxRate: Number(d.taxRate) || 0,
+        taxDeducted: Number(d.taxDeducted) || 0,
+        netProfit: Number(d.netProfit) || 0,
         status: d.status || 'New',
         notes: cleanRawActionPayload(d.notes || ''),
         followUpDate: d.followUpDate || '',
@@ -854,6 +899,10 @@ function startFirestoreLeadsListener() {
         officerId: d.officerId || '',
         branchName: d.branchName || 'Main Branch',
         userId: d.userId || '',
+        latitude: d.latitude ?? null,
+        longitude: d.longitude ?? null,
+        locationAddress: d.locationAddress || '',
+        locationCapturedAt: Number(d.locationCapturedAt) || 0,
         createdAt: Number(d.createdAt) || Date.now(),
         syncStatus: 'synced',
         approachCount: Number(d.approachCount) || (Array.isArray(d.activities) ? d.activities.length : 1),
@@ -864,7 +913,6 @@ function startFirestoreLeadsListener() {
       localMap.set(leadId, remoteLead);
     });
 
-    // If a previously synced lead was deleted on Android/another client, remove it locally too
     for (const local of localLeads) {
       if (local.syncStatus === 'synced' && !remoteIds.has(local.id)) {
         await LocalDB.deleteLead(local.id);
@@ -872,182 +920,20 @@ function startFirestoreLeadsListener() {
     }
 
     await renderLeads();
-    updateBranchFilterOptions();
+    updateSettingsStats();
+    if (adminUnlocked) {
+      await renderAdminLeadsDbList();
+    }
   }, (err) => {
     console.warn('Leads sync stream notice:', err);
   });
 }
 
-// Update Branch Filter Dropdown
-async function updateBranchFilterOptions() {
-  const branchSelect = document.getElementById('branchFilterSelect');
-  if (!branchSelect) return;
-
-  const currentSelection = branchSelect.value;
-  const leads = await LocalDB.getAllLeads();
-  const branches = new Set();
-
-  if (officerProfile.branchName) branches.add(officerProfile.branchName);
-
-  leads.forEach(l => {
-    if (l.branchName && l.branchName.trim()) {
-      branches.add(l.branchName.trim());
-    }
-  });
-
-  const branchArray = Array.from(branches).sort();
-  branchSelect.innerHTML = '<option value="All">All Branches (ساری برانچز)</option>';
-
-  branchArray.forEach(b => {
-    const opt = document.createElement('option');
-    opt.value = b;
-    opt.textContent = `🏢 ${b}`;
-    branchSelect.appendChild(opt);
-  });
-
-  if (currentSelection && currentSelection !== 'All' && branchArray.includes(currentSelection)) {
-    branchSelect.value = currentSelection;
-  } else if (officerProfile.branchName && branchArray.includes(officerProfile.branchName)) {
-    const isSupervisor = currentUserProfile && (currentUserProfile.role === 'Admin' || currentUserProfile.canUseSupervisorFilter);
-    if (!isSupervisor) {
-      branchSelect.value = officerProfile.branchName;
-    }
-  }
-}
-
-// 9. PRODUCT MANAGEMENT & EDIT MODAL
-function renderProductsManagementList() {
-  const container = document.getElementById('productsManageList');
-  if (!container) return;
-
-  container.innerHTML = BANK_PRODUCTS.map(p => `
-    <div class="product-manage-item">
-      <div class="product-manage-info">
-        <h4>${escapeHtml(p.name)}</h4>
-        <p>Category: <strong>${p.category === 'asset' ? '💼 Loan' : '💰 Deposit'}</strong> • Rate: <strong>${p.defaultAnnualRate}%</strong> • Tenures: ${p.tenures.join(', ')} M</p>
-      </div>
-      <button type="button" class="btn btn-outline" onclick="editProduct('${p.id}')" style="width: auto; height: 32px; font-size: 0.75rem; padding: 0 10px;">
-        ✏️ Edit
-      </button>
-    </div>
-  `).join('');
-}
-
-function openNewProductModal() {
-  document.getElementById('editProductModalTitle').textContent = '➕ Add New Bank Facility';
-  document.getElementById('prodEditId').value = 'prod-' + Date.now();
-  document.getElementById('prodEditName').value = '';
-  document.getElementById('prodEditCategory').value = 'asset';
-  document.getElementById('prodEditRateType').value = 'reducing';
-  document.getElementById('prodEditRate').value = '38.0';
-  document.getElementById('prodEditFee').value = '1.5';
-  document.getElementById('prodEditMinAmount').value = '50000';
-  document.getElementById('prodEditMaxAmount').value = '1000000';
-  document.getElementById('prodEditMinTenure').value = '3';
-  document.getElementById('prodEditMaxTenure').value = '36';
-  openModal('editProductModal');
-}
-
-function editProduct(productId) {
-  const p = BANK_PRODUCTS.find(item => item.id === productId);
-  if (!p) return;
-
-  document.getElementById('editProductModalTitle').textContent = '⚙️ Edit Product: ' + p.name;
-  document.getElementById('prodEditId').value = p.id;
-  document.getElementById('prodEditName').value = p.name;
-  document.getElementById('prodEditCategory').value = p.category;
-  document.getElementById('prodEditRateType').value = p.rateType;
-  document.getElementById('prodEditRate').value = p.defaultAnnualRate;
-  document.getElementById('prodEditFee').value = p.feePercent || 1.5;
-  document.getElementById('prodEditMinAmount').value = p.minAmount;
-  document.getElementById('prodEditMaxAmount').value = p.maxAmount;
-  document.getElementById('prodEditMinTenure').value = p.minTenure;
-  document.getElementById('prodEditMaxTenure').value = p.maxTenure;
-  openModal('editProductModal');
-}
-
-async function confirmSaveProduct() {
-  const pId = document.getElementById('prodEditId').value.trim();
-  const name = document.getElementById('prodEditName').value.trim();
-  const category = document.getElementById('prodEditCategory').value;
-  const rateType = document.getElementById('prodEditRateType').value;
-  const rate = parseFloat(document.getElementById('prodEditRate').value) || 0.0;
-  const fee = parseFloat(document.getElementById('prodEditFee').value) || 0.0;
-  const minAmount = parseInt(document.getElementById('prodEditMinAmount').value, 10) || 50000;
-  const maxAmount = parseInt(document.getElementById('prodEditMaxAmount').value, 10) || 1000000;
-  const minTenure = parseInt(document.getElementById('prodEditMinTenure').value, 10) || 3;
-  const maxTenure = parseInt(document.getElementById('prodEditMaxTenure').value, 10) || 36;
-
-  if (!name) {
-    alert('Please enter a product name.');
-    return;
-  }
-
-  let prod = BANK_PRODUCTS.find(p => p.id === pId);
-  if (prod) {
-    prod.name = name;
-    prod.category = category;
-    prod.rateType = rateType;
-    prod.defaultAnnualRate = rate;
-    prod.feePercent = fee;
-    prod.minAmount = minAmount;
-    prod.maxAmount = maxAmount;
-    prod.minTenure = minTenure;
-    prod.maxTenure = maxTenure;
-  } else {
-    prod = {
-      id: pId,
-      name,
-      category,
-      rateType,
-      defaultAnnualRate: rate,
-      feePercent: fee,
-      minAmount,
-      maxAmount,
-      minTenure,
-      maxTenure,
-      tenures: [6, 12, 18, 24, 36],
-      fedRate: globalConfig.fedRate || 16.0,
-      rateSlabs: [],
-      feeSlabs: [],
-      tenureRates: {},
-      liabilityPricingType: ''
-    };
-    BANK_PRODUCTS.push(prod);
-  }
-
-  if (fb) {
-    try {
-      await fb.setDoc('products', pId, {
-        id: pId,
-        name,
-        category,
-        rateType,
-        defaultAnnualRate: rate,
-        defaultFeeValue: fee,
-        fedRate: globalConfig.fedRate || 16.0,
-        minAmount,
-        maxAmount,
-        minTenure,
-        maxTenure,
-        updatedAt: fb.serverTimestamp()
-      }, true);
-    } catch (e) {
-      console.warn('Error saving product to Firestore:', e);
-    }
-  }
-
-  closeModal('editProductModal');
-  populateProducts(pId);
-  calculate();
-  renderProductsManagementList();
-  alert('✅ Product saved and synced to Firestore!');
-}
-
-// 10. ONLINE / OFFLINE STATUS
+// 9. ONLINE / OFFLINE & NAVIGATION
 function updateOnlineStatus() {
   const dot = document.getElementById('statusDot');
   const text = document.getElementById('statusText');
+  if (!dot || !text) return;
   if (navigator.onLine) {
     dot.classList.remove('offline');
     text.textContent = 'Online';
@@ -1057,349 +943,151 @@ function updateOnlineStatus() {
   }
 }
 
-function switchTab(tabId, el) {
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  document.getElementById(tabId).classList.add('active');
-  el.classList.add('active');
-  if (tabId === 'leadsTab') renderLeads();
-  if (tabId === 'settingsTab') {
+function switchTab(tabId, navElement) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+
+  const target = document.getElementById(tabId);
+  if (target) target.classList.add('active');
+  if (navElement) navElement.classList.add('active');
+  else {
+    const fallbackNav = document.querySelector(`.nav-item[data-tab="${tabId}"]`);
+    if (fallbackNav) fallbackNav.classList.add('active');
+  }
+
+  if (tabId === 'leadsTab') {
+    renderLeads();
+  } else if (tabId === 'settingsTab') {
     updateSettingsStats();
-    renderProductsManagementList();
+  } else if (tabId === 'adminTab' && adminUnlocked) {
+    populateAdminControls();
   }
 }
 
-function setCategory(cat) {
-  currentCategory = cat;
-  const assetBtn = document.getElementById('catAssetBtn');
-  const liabBtn = document.getElementById('catLiabBtn');
-  const incomeRow = document.getElementById('incomeRow');
-  const filerRow = document.getElementById('filerToggleRow');
-  const amortBtn = document.getElementById('amortBtn');
-  const amountLabel = document.getElementById('amountLabel');
-
-  if (cat === 'asset') {
-    assetBtn.className = 'btn btn-primary';
-    liabBtn.className = 'btn btn-outline';
-    incomeRow.style.display = 'flex';
-    filerRow.style.display = 'none';
-    amortBtn.style.display = 'inline-flex';
-    amountLabel.textContent = 'Loan Amount (PKR)';
-    document.getElementById('loanAmount').value = 500000;
-  } else {
-    assetBtn.className = 'btn btn-outline';
-    liabBtn.className = 'btn btn-primary';
-    incomeRow.style.display = 'none';
-    filerRow.style.display = 'flex';
-    amortBtn.style.display = 'none';
-    amountLabel.textContent = 'Deposit Amount (PKR)';
-    document.getElementById('loanAmount').value = 500000;
-  }
-  populateProducts();
-  calculate();
-}
-
-function populateProducts(preserveId = null) {
-  const select = document.getElementById('productSelect');
-  select.innerHTML = '';
-  const filtered = BANK_PRODUCTS.filter(p => p.category === currentCategory);
-  filtered.forEach(p => {
-    const opt = document.createElement('option');
-    opt.value = p.id;
-    opt.textContent = `${p.name} (${p.defaultAnnualRate}%)`;
-    select.appendChild(opt);
-  });
-  const preserved = preserveId ? filtered.find(p => p.id === preserveId) : null;
-  currentProduct = preserved || filtered[0] || BANK_PRODUCTS[0];
-  if (currentProduct) select.value = currentProduct.id;
-  populateTenures();
-}
-
-function populateTenures() {
-  const tenureSelect = document.getElementById('tenureMonths');
-  const prevTenure = parseInt(tenureSelect.value, 10);
-  tenureSelect.innerHTML = '';
-  if (!currentProduct || !currentProduct.tenures) return;
-  currentProduct.tenures.forEach(m => {
-    const opt = document.createElement('option');
-    opt.value = m;
-    opt.textContent = `${m} Months`;
-    tenureSelect.appendChild(opt);
-  });
-  if (prevTenure && currentProduct.tenures.includes(prevTenure)) {
-    tenureSelect.value = prevTenure;
-  }
-}
-
-function onProductChange() {
-  const id = document.getElementById('productSelect').value;
-  currentProduct = BANK_PRODUCTS.find(p => p.id === id) || BANK_PRODUCTS[0];
-  populateTenures();
-  calculate();
-}
-
-// 11. CALCULATOR ENGINE (Exact Android LoanCalculators.kt Parity)
-let lastCalculation = null;
-
-function getApplicableRate(product, amount, tenureMonths) {
-  const hasPositiveSlab = Array.isArray(product.rateSlabs) && product.rateSlabs.some(s => Number(s.annualRate) > 0);
-  const hasPositiveTenure = product.tenureRates && Object.values(product.tenureRates).some(r => Number(r) > 0);
-  if (product.defaultAnnualRate <= 0 && !hasPositiveSlab && !hasPositiveTenure) {
-    return 0.0;
-  }
-
-  // Helper to match amount slab
-  const findAmountSlabRate = (slabs) => {
-    if (!Array.isArray(slabs) || slabs.length === 0) return null;
-    if (amount > 0) {
-      const exact = slabs.find(s => amount >= Number(s.minAmount) && amount <= Number(s.maxAmount));
-      if (exact) return Number(exact.annualRate);
-      let nearest = slabs[0];
-      let minDist = Infinity;
-      slabs.forEach(s => {
-        const minA = Number(s.minAmount);
-        const maxA = Number(s.maxAmount);
-        const dist = amount < minA ? (minA - amount) : (amount > maxA ? (amount - maxA) : 0);
-        if (dist < minDist) { minDist = dist; nearest = s; }
-      });
-      if (nearest) return Number(nearest.annualRate);
+// 10. GEOLOCATION & PROPOSAL DISPATCH (NON-WRAPPING ACTIONS)
+function captureBrowserLocation(timeoutMs = 3500) {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      resolve(null);
+      return;
     }
-    return Number(slabs[0].annualRate);
-  };
-
-  if (product.category === 'liability') {
-    const isAmountTierBased = product.liabilityPricingType === 'amount' ||
-      ((!product.tenureRates || Object.keys(product.tenureRates).length === 0) && Array.isArray(product.rateSlabs) && product.rateSlabs.length > 1);
-    if (isAmountTierBased && product.rateSlabs && product.rateSlabs.length > 0) {
-      const slabRate = findAmountSlabRate(product.rateSlabs);
-      if (slabRate !== null) return slabRate;
-    }
-
-    if (product.tenureRates && Object.keys(product.tenureRates).length > 0) {
-      const keys = Object.keys(product.tenureRates).map(Number).filter(n => !isNaN(n));
-      if (tenureMonths > 0 && keys.length > 0) {
-        if (product.tenureRates[tenureMonths] !== undefined) {
-          return Number(product.tenureRates[tenureMonths]);
-        }
-        let nearestK = keys[0];
-        let minDiff = Math.abs(nearestK - tenureMonths);
-        keys.forEach(k => {
-          const diff = Math.abs(k - tenureMonths);
-          if (diff < minDiff) { minDiff = diff; nearestK = k; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lng = Number(pos.coords.longitude.toFixed(6));
+        resolve({
+          latitude: lat,
+          longitude: lng,
+          locationAddress: `GPS: ${lat}, ${lng}`,
+          locationCapturedAt: Date.now()
         });
-        return Number(product.tenureRates[nearestK]);
-      } else if (keys.length > 0) {
-        return Number(product.tenureRates[keys[0]]);
-      }
-    }
-  }
-
-  if (Array.isArray(product.rateSlabs) && product.rateSlabs.length > 0) {
-    const slabRate = findAmountSlabRate(product.rateSlabs);
-    if (slabRate !== null) return slabRate;
-  }
-
-  return Number(product.defaultAnnualRate) || 0;
+      },
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 60000 }
+    );
+  });
 }
 
-function calculateProcessingFee(product, principal, fedRate) {
-  if (principal <= 0) return { baseFee: 0, fedAmount: 0, totalFee: 0 };
+function buildCalculatorProposalText() {
+  if (!currentProduct || !lastCalculation) return '';
+  const cust = document.getElementById('customerName').value.trim() || 'Valued Customer';
+  const isLiab = currentProduct.category === 'liability';
+  const emiOrProfit = isLiab ? (lastCalculation.netMonthlyProfit || 0) : (lastCalculation.emi || 0);
+  const feeOrTax = isLiab ? (lastCalculation.totalTax || 0) : (lastCalculation.totalFee || 0);
+  const totalOrMat = isLiab ? (lastCalculation.netMaturity || 0) : (lastCalculation.totalPayable || 0);
 
-  let fee = 0;
-  if (Array.isArray(product.feeSlabs) && product.feeSlabs.length > 0) {
-    let slab = product.feeSlabs.find(s => principal >= Number(s.minAmount) && principal <= Number(s.maxAmount));
-    if (!slab) {
-      let minDist = Infinity;
-      product.feeSlabs.forEach(s => {
-        const minA = Number(s.minAmount);
-        const maxA = Number(s.maxAmount);
-        const dist = principal < minA ? (minA - principal) : (principal > maxA ? (principal - maxA) : 0);
-        if (dist < minDist) { minDist = dist; slab = s; }
-      });
-    }
-    if (slab) {
-      const raw = (String(slab.feeType).toLowerCase() === 'fixed')
-        ? Math.round(Number(slab.feeValue) || 0)
-        : Math.round((principal * (Number(slab.feeValue) || 0)) / 100.0);
-      const minApplied = Math.max(Number(slab.minFee) || 0, raw);
-      const maxFee = Number(slab.maxFee) || 0;
-      fee = maxFee > 0 ? Math.min(minApplied, maxFee) : minApplied;
-    }
-  } else if (product.feePercent > 0) {
-    fee = Math.round(principal * (product.feePercent / 100.0));
-  }
-
-  const fedAmount = Math.round((fee * fedRate) / 100.0);
-  return { baseFee: fee, fedAmount, totalFee: fee + fedAmount };
+  return [
+    `السلام علیکم جناب *${cust}*،`,
+    `*KBL Financing & Deposit Services*`,
+    ``,
+    `آپ کی مطلوبہ ${isLiab ? 'ڈپازٹ' : 'لون'} کوٹیشن:`,
+    `• پراڈکٹ: *${currentProduct.name}*`,
+    `• رقم (Principal): *PKR ${formatPKR(lastCalculation.amount)}*`,
+    `• مدت (Tenure): *${lastCalculation.tenure} ماہ*`,
+    `• شرح منافع / مارک اپ: *${lastCalculation.rate}%*`,
+    isLiab
+      ? `• ماہانہ خالص منافع (Net Profit): *PKR ${formatPKR(emiOrProfit)}*`
+      : `• ماہانہ قسط (EMI): *PKR ${formatPKR(emiOrProfit)}*`,
+    isLiab
+      ? `• ودہولڈنگ ٹیکس (${lastCalculation.taxRate}%): *PKR ${formatPKR(feeOrTax)}*`
+      : `• پروسیسنگ فیس (مع FED): *PKR ${formatPKR(feeOrTax)}*`,
+    isLiab
+      ? `• مدت پوری ہونے پر کل خالص رقم: *PKR ${formatPKR(totalOrMat)}*`
+      : `• کل قابل ادائیگی رقم: *PKR ${formatPKR(totalOrMat)}*`,
+    ``,
+    `مزید معلومات کے لیے رابطہ فرمائیں۔ شکریہ!`,
+    `آفیسر: ${officerProfile.officerName} (${officerProfile.staffId})`,
+    `برانچ: ${officerProfile.branchName}`
+  ].join('\n');
 }
 
-function calculate() {
-  if (!currentProduct) return;
-  const amount = parseFloat(document.getElementById('loanAmount').value) || 0;
-  const tenure = parseInt(document.getElementById('tenureMonths').value, 10) || 12;
-  const monthlyIncome = parseFloat(document.getElementById('monthlyIncome').value) || 0;
-  const allowedDbr = parseFloat(document.getElementById('allowedDbr').value) || 50;
-  const isFiler = document.getElementById('isFilerToggle').checked;
-
-  const rate = getApplicableRate(currentProduct, amount, tenure);
-  document.getElementById('resRate').textContent = `${rate.toFixed(2).replace(/\.00$/, '.0')}%`;
-
-  if (currentProduct.category === 'asset') {
-    let emi = 0;
-    let totalProfit = 0;
-    let totalPayable = 0;
-
-    if (String(currentProduct.rateType).toLowerCase() === 'flat') {
-      totalProfit = Math.round(amount * (rate / 100.0) * (tenure / 12.0));
-      totalPayable = amount + totalProfit;
-      emi = Math.round(totalPayable / tenure);
-    } else {
-      const monthlyRate = (rate / 100.0) / 12.0;
-      if (monthlyRate === 0) {
-        emi = Math.round(amount / tenure);
-        totalPayable = amount;
-      } else {
-        const factor = Math.pow(1.0 + monthlyRate, tenure);
-        emi = Math.round((amount * monthlyRate * factor) / (factor - 1.0));
-        totalPayable = emi * tenure;
-        totalProfit = totalPayable - amount;
-      }
-    }
-
-    const effectiveFed = currentProduct.fedRate || globalConfig.fedRate || 16.0;
-    const feeRes = calculateProcessingFee(currentProduct, amount, effectiveFed);
-    const totalFee = feeRes.totalFee;
-    const dbrRatio = monthlyIncome > 0 ? ((emi / monthlyIncome) * 100).toFixed(1) : '0';
-
-    document.getElementById('emiRow').style.display = 'flex';
-    document.getElementById('dbrRow').style.display = 'flex';
-    document.getElementById('feeRow').style.display = 'flex';
-    document.getElementById('profitRow').style.display = 'flex';
-    document.getElementById('rateLabel').textContent = 'Applied Profit Rate:';
-    document.getElementById('emiRow').children[0].textContent = 'Monthly Installment (EMI):';
-    document.getElementById('feeRow').children[0].textContent = `Processing Fee (inc. ${effectiveFed}% FED):`;
-    document.getElementById('profitLabel').textContent = 'Total Profit / Markup:';
-    document.getElementById('totalPayableLabel').textContent = 'Total Repayable Amount:';
-
-    document.getElementById('resEmi').textContent = formatPKR(emi);
-    document.getElementById('resDbr').textContent = `${dbrRatio}% ${parseFloat(dbrRatio) > allowedDbr ? '❌ Exceeds DBR!' : '✅ Within Limit'}`;
-    document.getElementById('resFee').textContent = formatPKR(totalFee);
-    document.getElementById('resProfit').textContent = formatPKR(totalProfit);
-    document.getElementById('resTotalPayable').textContent = formatPKR(totalPayable);
-
-    lastCalculation = {
-      category: 'asset',
-      amount,
-      tenure,
-      rate,
-      emi,
-      totalProfit,
-      totalFee,
-      totalPayable,
-      dbrRatio: parseFloat(dbrRatio)
-    };
-  } else {
-    const taxRate = isFiler ? (globalConfig.filerTaxRate || 20.0) : (globalConfig.nonFilerTaxRate || 40.0);
-    const grossTotalProfit = Math.round(amount * (rate / 100.0) * (tenure / 12.0));
-    const grossMonthlyProfit = Math.round((amount * (rate / 100.0)) / 12.0);
-    const totalTax = Math.round(grossTotalProfit * (taxRate / 100.0));
-    const monthlyTax = Math.round(grossMonthlyProfit * (taxRate / 100.0));
-    const netTotalProfit = Math.max(0, grossTotalProfit - totalTax);
-    const netMonthlyProfit = Math.max(0, grossMonthlyProfit - monthlyTax);
-    const netMaturity = amount + netTotalProfit;
-
-    document.getElementById('emiRow').style.display = 'flex';
-    document.getElementById('dbrRow').style.display = 'none';
-    document.getElementById('feeRow').style.display = 'flex';
-    document.getElementById('profitRow').style.display = 'flex';
-    document.getElementById('rateLabel').textContent = 'Annual Profit Rate:';
-    document.getElementById('emiRow').children[0].textContent = 'Net Monthly Profit:';
-    document.getElementById('feeRow').children[0].textContent = `WHT Tax Deduction (${taxRate}%):`;
-    document.getElementById('profitLabel').textContent = 'Net Total Profit:';
-    document.getElementById('totalPayableLabel').textContent = 'Net Maturity Amount:';
-
-    document.getElementById('resEmi').textContent = formatPKR(netMonthlyProfit);
-    document.getElementById('resFee').textContent = formatPKR(totalTax);
-    document.getElementById('resProfit').textContent = formatPKR(netTotalProfit);
-    document.getElementById('resTotalPayable').textContent = formatPKR(netMaturity);
-
-    lastCalculation = {
-      category: 'liability',
-      amount,
-      tenure,
-      rate,
-      netMonthlyProfit,
-      totalTax,
-      netTotalProfit,
-      netMaturity,
-      isFiler,
-      taxRate
-    };
-  }
-}
-
-// 12. AMORTIZATION SCHEDULE GENERATOR
-function openAmortizationModal() {
-  if (!lastCalculation || lastCalculation.category !== 'asset') {
-    alert('Amortization schedule is available for Asset Loan products.');
+function copyProposalText() {
+  const txt = buildCalculatorProposalText();
+  if (!txt) {
+    showToast('Calculate a plan first.');
     return;
   }
-  const tbody = document.getElementById('amortTableBody');
-  tbody.innerHTML = '';
-
-  const { amount, tenure, rate, emi } = lastCalculation;
-  let balance = amount;
-  const monthlyRate = (rate / 100.0) / 12.0;
-
-  for (let m = 1; m <= tenure; m++) {
-    const profit = Math.round(balance * monthlyRate);
-    const principal = Math.min(balance, emi - profit);
-    balance = Math.max(0, balance - principal);
-
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td style="text-align: center; font-weight: 700;">${m}</td>
-      <td>${formatPKR(emi)}</td>
-      <td>${formatPKR(principal)}</td>
-      <td>${formatPKR(profit)}</td>
-      <td style="font-weight: 700;">${formatPKR(balance)}</td>
-    `;
-    tbody.appendChild(tr);
-    if (balance <= 0) break;
-  }
-  openModal('amortizationModal');
+  copyToClipboard(txt, '📋 Proposal quotation copied to clipboard!');
 }
 
-// 13. SAVE LEAD TO LOCAL DB & FIRESTORE
-async function saveLeadFromCalculator() {
+async function saveLeadFromCalculator(silent = false) {
   const custName = document.getElementById('customerName').value.trim();
   const mobile = document.getElementById('customerMobile').value.trim();
+  const dob = document.getElementById('customerDob').value;
   const notes = document.getElementById('leadNotes').value.trim();
+  const monthlyIncome = parseFloat(document.getElementById('monthlyIncome').value) || 0;
+  const allowedDbr = parseFloat(document.getElementById('allowedDbr').value) || 50;
 
   if (!custName) {
-    alert('Please enter customer name (گاہک کا نام درج کریں).');
-    return;
+    if (!silent) showToast('⚠️ Please enter customer name (گاہک کا نام درج کریں).');
+    return null;
   }
   if (!mobile) {
-    alert('Please enter mobile number (موبائل نمبر درج کریں).');
-    return;
+    if (!silent) showToast('⚠️ Please enter mobile number (موبائل نمبر درج کریں).');
+    return null;
+  }
+  if (!lastCalculation || lastCalculation.amount <= 0) {
+    if (!silent) showToast('⚠️ Enter Income & DBR or Desired Amount first.');
+    return null;
   }
 
+  const ageInfo = calculateDetailedAge(dob);
   const existingLeads = await LocalDB.getAllLeads();
   let lead = existingLeads.find(l => l.mobile === mobile || (l.customerName.toLowerCase() === custName.toLowerCase() && l.productName === currentProduct.name));
 
   const now = Date.now();
   const cleanNote = cleanRawActionPayload(notes);
+  const loc = await captureBrowserLocation(2500);
+
+  const isLiab = currentProduct.category === 'liability';
+  const effEmi = isLiab ? (lastCalculation.netMonthlyProfit || 0) : (lastCalculation.emi || 0);
+  const effProfit = isLiab ? (lastCalculation.netTotalProfit || 0) : (lastCalculation.totalProfit || 0);
+  const effFee = isLiab ? (lastCalculation.totalTax || 0) : (lastCalculation.totalFee || 0);
 
   if (lead) {
     lead.customerName = custName;
+    lead.dob = dob || lead.dob || '';
+    lead.age = ageInfo.years || lead.age || 0;
+    lead.monthlyIncome = monthlyIncome || lead.monthlyIncome || 0;
+    lead.dbrAllowed = allowedDbr || lead.dbrAllowed || 50;
+    lead.category = currentProduct.category;
+    lead.productId = currentProduct.id;
+    lead.productName = currentProduct.name;
     lead.loanAmount = lastCalculation.amount;
     lead.tenureMonths = lastCalculation.tenure;
-    lead.category = currentProduct.category;
-    lead.productName = currentProduct.name;
-    lead.monthlyEmi = lastCalculation.emi || lastCalculation.netMonthlyProfit || 0;
-    lead.totalProfit = lastCalculation.totalProfit || lastCalculation.netTotalProfit || 0;
-    lead.processingFee = lastCalculation.totalFee || 0;
+    lead.monthlyEmi = effEmi;
+    lead.totalProfit = effProfit;
+    lead.processingFee = effFee;
+    lead.isFiler = isLiab ? isFilerCustomer : true;
+    lead.taxRate = isLiab ? (lastCalculation.taxRate || 0) : 0;
+    lead.taxDeducted = isLiab ? (lastCalculation.totalTax || 0) : 0;
+    lead.netProfit = isLiab ? (lastCalculation.netTotalProfit || 0) : 0;
+    if (loc) {
+      lead.latitude = loc.latitude;
+      lead.longitude = loc.longitude;
+      lead.locationAddress = loc.locationAddress;
+      lead.locationCapturedAt = loc.locationCapturedAt;
+    }
     lead.syncStatus = 'pending_sync';
     if (!lead.activities) lead.activities = [];
 
@@ -1420,7 +1108,7 @@ async function saveLeadFromCalculator() {
       timestamp: now,
       actionType: 'proposal_update',
       title: '📋 Proposal Saved',
-      details: `${currentProduct.name} (PKR ${formatPKR(lastCalculation.amount)})`,
+      details: `${currentProduct.name} (PKR ${formatPKR(lastCalculation.amount)}, ${lastCalculation.tenure}M)`,
       officerName: officerProfile.officerName,
       officerId: officerProfile.staffId
     });
@@ -1442,8 +1130,8 @@ async function saveLeadFromCalculator() {
       id: 'create-' + now,
       timestamp: now,
       actionType: 'created',
-      title: currentProduct.category === 'liability' ? '🎯 Deposit Lead Created' : '🎯 Loan Lead Created',
-      details: `${currentProduct.name} (PKR ${formatPKR(lastCalculation.amount)})`,
+      title: isLiab ? '🎯 Deposit Lead Created' : '🎯 Loan Lead Created',
+      details: `${currentProduct.name} (PKR ${formatPKR(lastCalculation.amount)}, ${lastCalculation.tenure}M)`,
       officerName: officerProfile.officerName,
       officerId: officerProfile.staffId
     });
@@ -1452,14 +1140,22 @@ async function saveLeadFromCalculator() {
       id,
       customerName: custName,
       mobile,
+      dob: dob || '',
+      age: ageInfo.years || 0,
+      monthlyIncome,
+      dbrAllowed,
       category: currentProduct.category,
       productId: currentProduct.id,
       productName: currentProduct.name,
       loanAmount: lastCalculation.amount,
       tenureMonths: lastCalculation.tenure,
-      monthlyEmi: lastCalculation.emi || lastCalculation.netMonthlyProfit || 0,
-      totalProfit: lastCalculation.totalProfit || lastCalculation.netTotalProfit || 0,
-      processingFee: lastCalculation.totalFee || 0,
+      monthlyEmi: effEmi,
+      totalProfit: effProfit,
+      processingFee: effFee,
+      isFiler: isLiab ? isFilerCustomer : true,
+      taxRate: isLiab ? (lastCalculation.taxRate || 0) : 0,
+      taxDeducted: isLiab ? (lastCalculation.totalTax || 0) : 0,
+      netProfit: isLiab ? (lastCalculation.netTotalProfit || 0) : 0,
       status: 'New',
       followUpDate: '',
       notes: cleanNote,
@@ -1467,6 +1163,10 @@ async function saveLeadFromCalculator() {
       officerId: officerProfile.staffId,
       branchName: officerProfile.branchName,
       userId: currentUser ? currentUser.uid : 'web-officer',
+      latitude: loc ? loc.latitude : null,
+      longitude: loc ? loc.longitude : null,
+      locationAddress: loc ? loc.locationAddress : '',
+      locationCapturedAt: loc ? loc.locationCapturedAt : 0,
       createdAt: now,
       syncStatus: 'pending_sync',
       approachCount: 1,
@@ -1491,273 +1191,112 @@ async function saveLeadFromCalculator() {
     }
   }
 
-  alert(`✅ Lead for ${custName} saved successfully and synced!`);
-
-  document.getElementById('customerName').value = '';
-  document.getElementById('customerMobile').value = '';
-  document.getElementById('leadNotes').value = '';
+  if (!silent) {
+    showToast(`✅ Lead for ${custName} saved & synced!`);
+    document.getElementById('customerName').value = '';
+    document.getElementById('customerMobile').value = '';
+    document.getElementById('customerDob').value = '';
+    document.getElementById('leadNotes').value = '';
+    updateAgeEligibilityUI();
+  }
 
   await renderLeads();
-  updateBranchFilterOptions();
+  updateSettingsStats();
 
   if (navigator.onLine && officerProfile.webhookUrl) {
     syncLeadToSheet(lead);
   }
+  return lead;
 }
 
-// 14. RENDER CUSTOMER LEADS LIST (WITH BRANCH, STATUS, & DELETE ACTIONS)
-async function renderLeads() {
-  const container = document.getElementById('leadsListContainer');
-  const countSpan = document.getElementById('leadsCount');
-  const search = document.getElementById('searchLeadsInput').value.toLowerCase().trim();
-  const statusFilter = document.getElementById('statusFilterSelect').value;
-  const branchFilter = document.getElementById('branchFilterSelect') ? document.getElementById('branchFilterSelect').value : 'All';
-
-  const leads = await LocalDB.getAllLeads();
-  countSpan.textContent = leads.length;
-
-  const filtered = leads.filter(l => {
-    const matchesStatus = statusFilter === 'All' || l.status === statusFilter;
-    const matchesBranch = branchFilter === 'All' || (l.branchName && l.branchName.trim() === branchFilter.trim());
-    const matchesSearch = !search ||
-      (l.customerName && l.customerName.toLowerCase().includes(search)) ||
-      (l.mobile && l.mobile.includes(search)) ||
-      (l.productName && l.productName.toLowerCase().includes(search)) ||
-      (l.branchName && l.branchName.toLowerCase().includes(search));
-    return matchesStatus && matchesBranch && matchesSearch;
-  });
-
-  filtered.sort((a, b) => b.createdAt - a.createdAt);
-
-  if (filtered.length === 0) {
-    container.innerHTML = `
-      <div class="card" style="text-align: center; color: var(--text-muted); padding: 30px;">
-        <p style="font-size: 1.1rem; margin-bottom: 6px;">📂 No customer leads found.</p>
-        <p style="font-size: 0.8rem;">Saved leads for the selected branch will appear here with instant Firestore & Google Sheets sync.</p>
-      </div>
-    `;
-    return;
-  }
-
-  const statuses = ['New', 'Contacted', 'Follow-Up', 'Converted', 'Lost'];
-
-  container.innerHTML = filtered.map(lead => {
-    const cleanNote = cleanRawActionPayload(lead.notes || '');
-    const badgeClass = 'badge-' + (lead.status || 'new').toLowerCase().replace(/[^a-z]/g, '');
-
-    return `
-      <div class="lead-card">
-        <div class="lead-header">
-          <div>
-            <div class="lead-name">${escapeHtml(lead.customerName)}</div>
-            <div class="lead-phone">📞 ${escapeHtml(lead.mobile)} • 🏢 ${escapeHtml(lead.branchName || 'Main')}</div>
-          </div>
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <select class="form-select" style="height: 28px; font-size: 0.72rem; padding: 0 6px; width: auto; font-weight: 700;" onchange="updateLeadStatus('${lead.id}', this.value)">
-              ${statuses.map(s => `<option value="${s}" ${(lead.status || 'New') === s ? 'selected' : ''}>${s}</option>`).join('')}
-            </select>
-            <span class="badge ${badgeClass}">${escapeHtml(lead.status || 'New')}</span>
-          </div>
-        </div>
-
-        <div style="font-size: 0.82rem; color: var(--primary); font-weight: 600; margin: 4px 0;">
-          ${escapeHtml(lead.productName)} • PKR ${formatPKR(lead.loanAmount)} (${lead.tenureMonths}M)
-        </div>
-
-        ${cleanNote ? `<div class="lead-notes-box">📝 ${escapeHtml(cleanNote)}</div>` : ''}
-
-        <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px;">
-          📅 Follow-Up: <strong>${lead.followUpDate ? escapeHtml(lead.followUpDate) : 'None'}</strong>
-          • Officer: <strong>${escapeHtml(lead.officerName || 'RO')}</strong>
-          • Cloud: <strong>${lead.syncStatus === 'synced' ? '✅ Synced' : '⏳ Queued'}</strong>
-        </div>
-
-        <div class="lead-actions">
-          <button type="button" class="btn btn-whatsapp" onclick="sendQuotationWhatsApp('${lead.id}')">💬 WhatsApp</button>
-          <button type="button" class="btn btn-sms" onclick="sendQuotationSMS('${lead.id}')">✉️ SMS</button>
-          <button type="button" class="btn btn-call" onclick="initiateCall('${lead.id}', '${lead.mobile}')">📞 Call</button>
-          <button type="button" class="btn btn-outline" onclick="openTrackRecord('${lead.id}')">📜 History</button>
-          <button type="button" class="btn btn-outline" onclick="openEditNoteModal('${lead.id}')">📝 Note</button>
-          <button type="button" class="btn btn-outline" onclick="openFollowUpModal('${lead.id}')">📅 Follow-Up</button>
-          <button type="button" class="btn btn-outline" style="color: var(--danger); border-color: #FCA5A5;" onclick="deleteLead('${lead.id}')">🗑 Delete</button>
-        </div>
-      </div>
-    `;
-  }).join('');
-}
-
-async function updateLeadStatus(leadId, newStatus) {
-  const leads = await LocalDB.getAllLeads();
-  const lead = leads.find(l => l.id === leadId);
-  if (!lead) return;
-
-  const oldStatus = lead.status || 'New';
-  if (oldStatus === newStatus) return;
-
-  const now = Date.now();
-  lead.status = newStatus;
-  lead.syncStatus = 'pending_sync';
-  if (!lead.activities) lead.activities = [];
-
-  lead.activities.push({
-    id: 'stat-' + now,
-    timestamp: now,
-    actionType: 'status_change',
-    title: '🔄 Status Changed',
-    details: `${oldStatus} ➔ ${newStatus}`,
-    officerName: officerProfile.officerName,
-    officerId: officerProfile.staffId
-  });
-
-  await LocalDB.saveLead(lead);
-
-  if (fb) {
-    try {
-      await fb.setDoc('leads', lead.id, {
-        status: newStatus,
-        activities: lead.activities,
-        syncStatus: 'synced',
-        updatedAtMs: Date.now(),
-        updatedAt: fb.serverTimestamp()
-      }, true);
-      lead.syncStatus = 'synced';
-      await LocalDB.saveLead(lead);
-    } catch (e) {
-      console.warn('Firestore status sync notice:', e);
-    }
-  }
-
-  renderLeads();
-  if (navigator.onLine && officerProfile.webhookUrl) syncLeadToSheet(lead);
-}
-
-async function deleteLead(leadId) {
-  if (!confirm('Are you sure you want to delete this lead?')) return;
-
-  await LocalDB.deleteLead(leadId);
-  if (fb) {
-    try {
-      await fb.deleteDoc('leads', leadId);
-    } catch (e) {
-      console.warn('Firestore delete notice:', e);
-    }
-  }
-  await renderLeads();
-  updateSettingsStats();
-}
-
-// 15. WHATSAPP & SMS QUOTATIONS WITH LOGGING
+// 11. WHATSAPP & SMS QUOTATIONS WITH AUTO-SAVE & APPROACH LOGGING
 async function sendQuotationWhatsApp(leadId = null) {
-  let custName = '';
   let mobile = '';
-  let prodName = '';
-  let amount = 0;
-  let tenure = 12;
-  let emi = 0;
-  let rate = 39.5;
-  let fee = 0;
-  let totalPayable = 0;
+  let msgText = '';
 
   if (leadId) {
     const leads = await LocalDB.getAllLeads();
     const lead = leads.find(l => l.id === leadId);
     if (!lead) return;
-    custName = lead.customerName;
     mobile = lead.mobile;
-    prodName = lead.productName;
-    amount = lead.loanAmount;
-    tenure = lead.tenureMonths;
-    emi = lead.monthlyEmi;
     const matchedProd = BANK_PRODUCTS.find(p => p.id === lead.productId || p.name === lead.productName) || currentProduct;
-    rate = getApplicableRate(matchedProd, amount, tenure);
-    fee = lead.processingFee;
-    totalPayable = amount + lead.totalProfit;
+    const rate = getApplicableRate(matchedProd, lead.loanAmount, lead.tenureMonths);
+    const totalPayable = (lead.loanAmount || 0) + (lead.totalProfit || 0);
+    msgText = [
+      `السلام علیکم جناب *${lead.customerName}*،`,
+      `*KBL Financing & Deposit Services*`,
+      ``,
+      `آپ کی مطلوبہ کوٹیشن:`,
+      `• پراڈکٹ: *${lead.productName}*`,
+      `• رقم: *PKR ${formatPKR(lead.loanAmount)}*`,
+      `• مدت: *${lead.tenureMonths} ماہ*`,
+      `• ریٹ: *${rate}%*`,
+      `• ماہانہ قسط / منافع: *PKR ${formatPKR(lead.monthlyEmi)}*`,
+      `• فیس / ٹیکس: *PKR ${formatPKR(lead.processingFee)}*`,
+      `• کل رقم: *PKR ${formatPKR(totalPayable)}*`,
+      ``,
+      `آفیسر: ${officerProfile.officerName} (${officerProfile.branchName})`
+    ].join('\n');
+
+    await logApproach(leadId, 'whatsapp', '💬 WhatsApp Quotation', `Quotation sent via WhatsApp to ${mobile}`);
   } else {
-    custName = document.getElementById('customerName').value.trim() || 'Valued Customer';
     mobile = document.getElementById('customerMobile').value.trim();
-    if (!mobile) {
-      alert('Please enter customer mobile number (موبائل نمبر درج کریں).');
+    const custName = document.getElementById('customerName').value.trim();
+    msgText = buildCalculatorProposalText();
+    if (!msgText) {
+      showToast('Calculate a plan first.');
       return;
     }
-    prodName = currentProduct.name;
-    amount = lastCalculation.amount;
-    tenure = lastCalculation.tenure;
-    emi = lastCalculation.emi || lastCalculation.netMonthlyProfit || 0;
-    rate = lastCalculation.rate;
-    fee = lastCalculation.totalFee || 0;
-    totalPayable = lastCalculation.totalPayable || lastCalculation.netMaturity || 0;
+    if (custName && mobile) {
+      const saved = await saveLeadFromCalculator(true);
+      if (saved) {
+        await logApproach(saved.id, 'whatsapp', '💬 WhatsApp Quotation', `Proposal shared on WhatsApp (${mobile})`);
+      }
+    }
   }
 
   const cleanPhone = formatForWhatsApp(mobile);
-  const msgText =
-`السلام علیکم جناب *${custName}*،
-*KB Bank Financing & Deposit Services*
-
-آپ کی مطلوبہ فنانسنگ / ڈپازٹ کوٹیشن:
-• پراڈکٹ: *${prodName}*
-• رقم: *PKR ${formatPKR(amount)}*
-• مدت: *${tenure} ماہ*
-• منافع / مارک اپ ریٹ: *${rate}%*
-• ماہانہ قسط (EMI / Monthly Profit): *PKR ${formatPKR(emi)}*
-• پروسیسنگ فیس: *PKR ${formatPKR(fee)}*
-• کل رقم: *PKR ${formatPKR(totalPayable)}*
-
-مزید معلومات کے لیے ہم سے رابطہ فرمائیں۔
-شکریہ!
-آفیسر: ${officerProfile.officerName}
-برانچ: ${officerProfile.branchName}`;
-
-  if (leadId) {
-    await logApproach(leadId, 'whatsapp', '💬 WhatsApp Quotation Sent', `Quotation sent via WhatsApp to ${mobile}`);
-  }
-
-  window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msgText)}`, '_blank');
+  const url = cleanPhone
+    ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msgText)}`
+    : `https://wa.me/?text=${encodeURIComponent(msgText)}`;
+  window.open(url, '_blank');
 }
 
 async function sendQuotationSMS(leadId = null) {
-  let custName = '';
   let mobile = '';
-  let prodName = '';
-  let amount = 0;
-  let tenure = 12;
-  let emi = 0;
+  let smsBody = '';
 
   if (leadId) {
     const leads = await LocalDB.getAllLeads();
     const lead = leads.find(l => l.id === leadId);
     if (!lead) return;
-    custName = lead.customerName;
     mobile = lead.mobile;
-    prodName = lead.productName;
-    amount = lead.loanAmount;
-    tenure = lead.tenureMonths;
-    emi = lead.monthlyEmi;
+    smsBody = `Dear ${lead.customerName}, KBL Quotation: ${lead.productName}, Amount: PKR ${formatPKR(lead.loanAmount)}, Tenure: ${lead.tenureMonths}M, Monthly: PKR ${formatPKR(lead.monthlyEmi)}. Contact: ${officerProfile.officerName} (${officerProfile.branchName})`;
+    await logApproach(leadId, 'sms', '✉️ SMS Quotation', `SMS quotation sent to ${mobile}`);
   } else {
-    custName = document.getElementById('customerName').value.trim() || 'Customer';
+    const custName = document.getElementById('customerName').value.trim() || 'Customer';
     mobile = document.getElementById('customerMobile').value.trim();
-    if (!mobile) {
-      alert('Please enter customer mobile number (موبائل نمبر درج کریں).');
+    if (!lastCalculation || lastCalculation.amount <= 0) {
+      showToast('Calculate a plan first.');
       return;
     }
-    prodName = currentProduct.name;
-    amount = lastCalculation.amount;
-    tenure = lastCalculation.tenure;
-    emi = lastCalculation.emi || lastCalculation.netMonthlyProfit || 0;
+    if (document.getElementById('customerName').value.trim() && mobile) {
+      const saved = await saveLeadFromCalculator(true);
+      if (saved) {
+        await logApproach(saved.id, 'sms', '✉️ SMS Quotation', `SMS quotation sent (${mobile})`);
+      }
+    }
+    const emiVal = lastCalculation.emi || lastCalculation.netMonthlyProfit || 0;
+    smsBody = `Dear ${custName}, KBL Quotation: ${currentProduct.name}, Amount: PKR ${formatPKR(lastCalculation.amount)}, Tenure: ${lastCalculation.tenure}M, Monthly: PKR ${formatPKR(emiVal)}. Contact: ${officerProfile.officerName} (${officerProfile.branchName})`;
   }
 
   const cleanPhone = mobile.replace(/\D/g, '');
-  const smsBody = `Dear ${custName}, KB Bank Quotation: ${prodName}, Amount: PKR ${formatPKR(amount)}, Tenure: ${tenure}M, Monthly: PKR ${formatPKR(emi)}. Contact: ${officerProfile.officerName} (${officerProfile.branchName})`;
-
-  if (leadId) {
-    await logApproach(leadId, 'sms', '✉️ SMS Quotation Sent', `SMS sent to ${mobile}`);
-  }
-
   window.location.href = `sms:${cleanPhone}?body=${encodeURIComponent(smsBody)}`;
 }
 
 async function initiateCall(leadId, mobile) {
-  await logApproach(leadId, 'call', '📞 Phone Call', `Phone call to ${mobile}`);
-  window.location.href = `tel:${mobile.replace(/\D/g, '')}`;
+  await logApproach(leadId, 'call', '📞 Phone Call', `Phone call initiated to ${mobile}`);
+  window.location.href = `tel:${String(mobile || '').replace(/\D/g, '')}`;
 }
 
 async function logApproach(leadId, type, title, detail) {
@@ -1801,15 +1340,67 @@ async function logApproach(leadId, type, title, detail) {
   if (navigator.onLine && officerProfile.webhookUrl) syncLeadToSheet(lead);
 }
 
-// 16. MODAL DIALOGS CONTROLLER
-function openModal(id) {
-  const el = document.getElementById(id);
-  if (el) el.classList.add('open');
+// 12. LEAD STATUS, NOTE, FOLLOW-UP & DELETE ACTIONS
+async function updateLeadStatus(leadId, newStatus) {
+  const leads = await LocalDB.getAllLeads();
+  const lead = leads.find(l => l.id === leadId);
+  if (!lead) return;
+
+  const oldStatus = lead.status || 'New';
+  if (oldStatus === newStatus) return;
+
+  const now = Date.now();
+  lead.status = newStatus;
+  lead.syncStatus = 'pending_sync';
+  if (!lead.activities) lead.activities = [];
+
+  lead.activities.push({
+    id: 'stat-' + now,
+    timestamp: now,
+    actionType: 'status_change',
+    title: '🔄 Status Changed',
+    details: `${oldStatus} ➔ ${newStatus}`,
+    officerName: officerProfile.officerName,
+    officerId: officerProfile.staffId
+  });
+
+  await LocalDB.saveLead(lead);
+
+  if (fb) {
+    try {
+      await fb.setDoc('leads', lead.id, {
+        status: newStatus,
+        activities: lead.activities,
+        syncStatus: 'synced',
+        updatedAtMs: Date.now(),
+        updatedAt: fb.serverTimestamp()
+      }, true);
+      lead.syncStatus = 'synced';
+      await LocalDB.saveLead(lead);
+    } catch (e) {
+      console.warn('Firestore status sync notice:', e);
+    }
+  }
+
+  renderLeads();
+  showToast(`✅ Status updated to ${newStatus}`);
+  if (navigator.onLine && officerProfile.webhookUrl) syncLeadToSheet(lead);
 }
 
-function closeModal(id) {
-  const el = document.getElementById(id);
-  if (el) el.classList.remove('open');
+async function deleteLead(leadId) {
+  if (!confirm('Are you sure you want to delete this lead?')) return;
+
+  await LocalDB.deleteLead(leadId);
+  if (fb) {
+    try {
+      await fb.deleteDoc('leads', leadId);
+    } catch (e) {
+      console.warn('Firestore delete notice:', e);
+    }
+  }
+  await renderLeads();
+  updateSettingsStats();
+  showToast('🗑️ Lead deleted.');
 }
 
 async function openTrackRecord(leadId) {
@@ -1868,6 +1459,7 @@ async function confirmSaveNote() {
   const now = Date.now();
 
   lead.notes = cleanNote;
+  lead.notesUpdateCount = (lead.notesUpdateCount || 0) + 1;
   lead.syncStatus = 'pending_sync';
   if (!lead.activities) lead.activities = [];
 
@@ -1900,6 +1492,7 @@ async function confirmSaveNote() {
 
   closeModal('editNoteModal');
   renderLeads();
+  showToast('✅ Note updated & synced!');
   if (navigator.onLine && officerProfile.webhookUrl) syncLeadToSheet(lead);
 }
 
@@ -1917,7 +1510,7 @@ async function confirmScheduleFollowUp() {
   if (!currentFollowUpLeadId) return;
   const dt = document.getElementById('followUpDateTimeInput').value;
   if (!dt) {
-    alert('Please select date and time.');
+    showToast('Please select date and time.');
     return;
   }
   const leads = await LocalDB.getAllLeads();
@@ -1959,6 +1552,7 @@ async function confirmScheduleFollowUp() {
 
   closeModal('followUpModal');
   renderLeads();
+  showToast('📅 Follow-Up scheduled!');
   if (navigator.onLine && officerProfile.webhookUrl) syncLeadToSheet(lead);
 }
 
@@ -1982,19 +1576,19 @@ async function confirmClearFollowUp() {
       }, true);
       lead.syncStatus = 'synced';
       await LocalDB.saveLead(lead);
-    } catch (e) {
-      console.warn('Firestore clear follow-up notice:', e);
-    }
+    } catch (e) {}
   }
 
   closeModal('followUpModal');
   renderLeads();
+  showToast('Cleared follow-up date.');
   if (navigator.onLine && officerProfile.webhookUrl) syncLeadToSheet(lead);
 }
 
-// 17. GOOGLE SHEETS IN-PLACE SYNC (DUAL-KEY UPSERT ENGINE)
+// 13. GOOGLE SHEETS IN-PLACE SYNC (DUAL-KEY UPSERT ENGINE)
 async function syncLeadToSheet(lead) {
-  if (!officerProfile.webhookUrl) return;
+  const url = officerProfile.webhookUrl || globalConfig.googleSheetsWebhookUrl;
+  if (!url) return;
 
   const dtFormat = formatDate(lead.createdAt);
   const activities = (lead.activities || []).slice().sort((a, b) => a.timestamp - b.timestamp);
@@ -2034,13 +1628,14 @@ async function syncLeadToSheet(lead) {
     officerName: lead.officerName || officerProfile.officerName,
     officerId: lead.officerId || officerProfile.staffId,
     branchName: lead.branchName || officerProfile.branchName,
+    locationAddress: lead.locationAddress || '',
     touchpointLog: touchpointLog,
     approachCount: lead.approachCount || (activities.length || 1),
     timestamp: dtFormat
   };
 
   try {
-    await fetch(officerProfile.webhookUrl, {
+    await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -2054,13 +1649,12 @@ async function syncLeadToSheet(lead) {
   }
 }
 
-async function manualSync() {
+async function manualSync(silent = false) {
   if (!navigator.onLine) {
-    alert('Device is currently offline.');
+    if (!silent) showToast('Device is currently offline.');
     return;
   }
 
-  // 1. Trigger Firestore fetch if authenticated
   if (fb && currentUser) {
     try {
       const snap = await fb.getDocs('leads');
@@ -2073,65 +1667,21 @@ async function manualSync() {
     }
   }
 
-  // 2. Trigger Google Sheets Push & Pull
-  if (!officerProfile.webhookUrl) {
-    await renderLeads();
-    updateBranchFilterOptions();
-    updateSettingsStats();
-    alert('✅ Synchronized with Firestore database!');
-    return;
-  }
-
-  const leads = await LocalDB.getAllLeads();
-  const pending = leads.filter(l => l.syncStatus !== 'synced');
-  for (const l of pending) {
-    await syncLeadToSheet(l);
-  }
-
-  try {
-    const res = await fetch(`${officerProfile.webhookUrl}?action=getLeads`, { method: 'GET' });
-    if (res.ok) {
-      const sheetData = await res.json();
-      if (Array.isArray(sheetData)) {
-        for (const r of sheetData) {
-          const cleanNote = cleanRawActionPayload(r.notes || '');
-          const sheetLead = {
-            id: r.id || ('kb-lead-' + Math.random().toString(36).substring(2, 8)),
-            customerName: r.customerName || '',
-            mobile: r.mobile || '',
-            category: r.category || 'asset',
-            productName: r.productName || '',
-            loanAmount: Number(r.loanAmount) || 0,
-            tenureMonths: Number(r.tenureMonths) || 12,
-            monthlyEmi: Number(r.monthlyEmi) || 0,
-            totalProfit: Number(r.totalProfit) || 0,
-            processingFee: Number(r.processingFee) || 0,
-            status: r.status || 'New',
-            notes: cleanNote,
-            followUpDate: r.followUpDate || '',
-            officerName: r.officerName || '',
-            officerId: r.officerId || '',
-            branchName: r.branchName || 'Main Branch',
-            createdAt: r.timestamp ? new Date(r.timestamp).getTime() : Date.now(),
-            syncStatus: 'synced',
-            approachCount: Number(r.approachCount) || 1,
-            activities: []
-          };
-          await LocalDB.saveLead(sheetLead);
-        }
-      }
+  const webhook = officerProfile.webhookUrl || globalConfig.googleSheetsWebhookUrl;
+  if (webhook) {
+    const leads = await LocalDB.getAllLeads();
+    const pending = leads.filter(l => l.syncStatus !== 'synced');
+    for (const l of pending) {
+      await syncLeadToSheet(l);
     }
-  } catch (err) {
-    console.warn('Google Sheet pull notice:', err);
   }
 
   await renderLeads();
-  updateBranchFilterOptions();
   updateSettingsStats();
-  alert('✅ Sync completed across Firestore and Google Sheets!');
+  if (!silent) showToast('✅ Synced with Firestore & Google Sheets!');
 }
 
-// 18. SETTINGS & PROFILE MANAGEMENT
+// 14. SETTINGS & PROFILE MANAGEMENT
 async function loadSettings() {
   officerProfile.officerName = await LocalDB.getSetting('officerName', 'Anjum Naveed');
   officerProfile.staffId = await LocalDB.getSetting('staffId', 'RM-8433');
@@ -2189,14 +1739,14 @@ async function saveSettings() {
 
   document.getElementById('officerBadge').textContent = `👤 Officer: ${officerProfile.officerName} (${officerProfile.staffId})`;
   document.getElementById('branchBadge').textContent = `🏢 ${officerProfile.branchName}`;
-  updateBranchFilterOptions();
-  alert('✅ Profile saved and synced!');
+  renderLeads();
+  showToast('✅ Profile saved and synced!');
 }
 
-async function testConnection() {
-  const url = document.getElementById('settingsWebhookUrl').value.trim();
+async function testConnection(customUrl = null) {
+  const url = (customUrl !== null ? customUrl : document.getElementById('settingsWebhookUrl').value).trim();
   if (!url) {
-    alert('Please enter Webhook URL first.');
+    showToast('Please enter Webhook URL first.');
     return;
   }
   try {
@@ -2207,19 +1757,21 @@ async function testConnection() {
       mode: 'cors'
     });
     if (resp.ok) {
-      alert('✅ Connected successfully to Google Sheets Web App!');
+      showToast('✅ Connected successfully to Google Sheets Web App!');
     } else {
-      alert('HTTP Response ' + resp.status + ' from endpoint.');
+      showToast('HTTP Response ' + resp.status + ' from endpoint.');
     }
   } catch (err) {
-    alert('Connection test note: ' + err.message);
+    showToast('Connection note: ' + err.message);
   }
 }
 
 async function updateSettingsStats() {
   const leads = await LocalDB.getAllLeads();
-  document.getElementById('statTotalLeads').textContent = leads.length;
-  document.getElementById('statPendingSync').textContent = leads.filter(l => l.syncStatus !== 'synced').length;
+  const totEl = document.getElementById('statTotalLeads');
+  const pendEl = document.getElementById('statPendingSync');
+  if (totEl) totEl.textContent = leads.length;
+  if (pendEl) pendEl.textContent = leads.filter(l => l.syncStatus !== 'synced').length;
 }
 
 async function exportLeadsJson() {
@@ -2230,20 +1782,70 @@ async function exportLeadsJson() {
   a.href = url;
   a.download = `kb-leads-backup-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
+  showToast('📥 Leads JSON backup downloaded');
 }
 
 function showInstallHelp() {
   openModal('installGuideModal');
 }
 
-// 19. UTILITY HELPERS
+// 15. MODALS, TOASTS & FORMATTING HELPERS
+function openModal(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.add('open');
+}
+
+function closeModal(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.remove('open');
+}
+
+function showToast(msg) {
+  const el = document.getElementById('toastBanner');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    el.classList.remove('show');
+  }, 3200);
+}
+
+function copyToClipboard(text, toastMsg = 'Copied!') {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      showToast(toastMsg);
+    }).catch(() => {
+      fallbackCopy(text, toastMsg);
+    });
+  } else {
+    fallbackCopy(text, toastMsg);
+  }
+}
+
+function fallbackCopy(text, toastMsg) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    showToast(toastMsg);
+  } catch (e) {}
+  document.body.removeChild(ta);
+}
+
 function formatPKR(val) {
   if (isNaN(val) || val === null || val === undefined) return '0';
   return Math.round(val).toLocaleString('en-PK');
 }
 
 function formatDate(ts) {
+  if (!ts) return 'N/A';
   const d = new Date(ts);
+  if (isNaN(d.getTime())) return 'N/A';
   const pad = (n) => String(n).padStart(2, '0');
   const yyyy = d.getFullYear();
   const mm = pad(d.getMonth() + 1);
@@ -2256,7 +1858,7 @@ function formatDate(ts) {
 }
 
 function formatForWhatsApp(phone) {
-  const digits = phone.replace(/\D/g, '');
+  const digits = String(phone || '').replace(/\D/g, '');
   if (digits.startsWith('03') && digits.length === 11) return '92' + digits.substring(1);
   if (digits.startsWith('3') && digits.length === 10) return '92' + digits;
   return digits;
