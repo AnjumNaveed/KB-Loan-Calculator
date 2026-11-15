@@ -6,6 +6,7 @@
 let calcCategoryFilter = 'all'; // 'all' | 'asset' | 'liability'
 let matrixTenureFilter = 'All';
 let selectedMatrixTenure = 12;
+let dispatchAllEligibleMode = false;
 let isFilerCustomer = true;
 
 let amortState = {
@@ -457,8 +458,14 @@ function syncUiForSelectedProduct() {
 function populateTenures() {
   const tenureSelect = document.getElementById('tenureMonths');
   if (!tenureSelect || !currentProduct) return;
-  const prevTenure = parseInt(tenureSelect.value, 10) || selectedMatrixTenure;
+  const rawPrev = tenureSelect.value;
+  const prevTenure = parseInt(rawPrev, 10) || selectedMatrixTenure;
   tenureSelect.innerHTML = '';
+
+  const allOpt = document.createElement('option');
+  allOpt.value = 'ALL_ELIGIBLE';
+  allOpt.textContent = '📋 Send All Eligible Plans';
+  tenureSelect.appendChild(allOpt);
 
   const pMin = Math.max(1, Number(currentProduct.minTenure) || 1);
   const pMax = Math.max(pMin, Number(currentProduct.maxTenure) || 36);
@@ -486,28 +493,48 @@ function populateTenures() {
   });
 
   if (tenures.includes(prevTenure)) {
-    tenureSelect.value = prevTenure;
     selectedMatrixTenure = prevTenure;
   } else if (tenures.includes(12)) {
-    tenureSelect.value = 12;
     selectedMatrixTenure = 12;
   } else {
-    tenureSelect.value = tenures[0];
     selectedMatrixTenure = tenures[0];
   }
+
+  tenureSelect.value = dispatchAllEligibleMode ? 'ALL_ELIGIBLE' : String(selectedMatrixTenure);
+}
+
+function isAllEligibleDispatchMode() {
+  const tenureEl = document.getElementById('tenureMonths');
+  return dispatchAllEligibleMode || (tenureEl && tenureEl.value === 'ALL_ELIGIBLE');
+}
+
+function toggleAllEligibleDispatchMode() {
+  const tenureSelect = document.getElementById('tenureMonths');
+  dispatchAllEligibleMode = !isAllEligibleDispatchMode();
+  if (tenureSelect) {
+    tenureSelect.value = dispatchAllEligibleMode ? 'ALL_ELIGIBLE' : String(selectedMatrixTenure || 12);
+  }
+  calculate();
 }
 
 function onProductChange() {
   const id = document.getElementById('productSelect').value;
   currentProduct = BANK_PRODUCTS.find(p => p.id === id) || BANK_PRODUCTS[0];
   matrixTenureFilter = 'All';
+  dispatchAllEligibleMode = false;
   syncUiForSelectedProduct();
   populateTenures();
   calculate();
 }
 
 function onTenureSelectChange() {
-  selectedMatrixTenure = parseInt(document.getElementById('tenureMonths').value, 10) || 12;
+  const val = document.getElementById('tenureMonths').value;
+  if (val === 'ALL_ELIGIBLE') {
+    dispatchAllEligibleMode = true;
+  } else {
+    dispatchAllEligibleMode = false;
+    selectedMatrixTenure = parseInt(val, 10) || 12;
+  }
   calculate();
 }
 
@@ -555,7 +582,11 @@ function calculate() {
   const manualAmt = parseFloat(rawAmtStr);
   const isAutoMaxMode = currentProduct.category !== 'liability' && (isNaN(manualAmt) || manualAmt <= 0);
 
-  const tenure = parseInt(document.getElementById('tenureMonths').value, 10) || selectedMatrixTenure || 12;
+  const rawSelVal = document.getElementById('tenureMonths').value;
+  if (rawSelVal === 'ALL_ELIGIBLE') {
+    dispatchAllEligibleMode = true;
+  }
+  const tenure = (rawSelVal && rawSelVal !== 'ALL_ELIGIBLE' ? parseInt(rawSelVal, 10) : 0) || selectedMatrixTenure || 12;
   selectedMatrixTenure = tenure;
 
   const monthlyIncome = parseFloat(document.getElementById('monthlyIncome').value) || 0;
@@ -686,6 +717,101 @@ function calculate() {
   }
 
   renderEligibilityMatrix();
+  updateDispatchModeBanner();
+}
+
+function getEligiblePlansForDispatch() {
+  if (!currentProduct) return [];
+  const isLiab = currentProduct.category === 'liability';
+  const income = parseFloat(document.getElementById('monthlyIncome').value) || 0;
+  const dbr = parseFloat(document.getElementById('allowedDbr').value) || 0;
+  const rawAmt = document.getElementById('loanAmount').value.trim();
+  const hasManualAmt = !isNaN(parseFloat(rawAmt)) && parseFloat(rawAmt) > 0;
+  const dobVal = document.getElementById('customerDob').value;
+  const ageInfo = evaluateAgeEligibility(dobVal, currentProduct);
+
+  if (isLiab) {
+    const appliedDep = hasManualAmt ? Math.round(parseFloat(rawAmt)) : (Number(currentProduct.minAmount) || 25000);
+    const isAmountTiered = currentProduct.liabilityPricingType === 'amount' ||
+      ((!currentProduct.tenureRates || Object.keys(currentProduct.tenureRates).length === 0) && Array.isArray(currentProduct.rateSlabs) && currentProduct.rateSlabs.length > 1);
+    const tenures = isAmountTiered
+      ? [1, 3, 6, 12]
+      : (Array.isArray(currentProduct.tenures) && currentProduct.tenures.length > 0 ? currentProduct.tenures : [6, 12, 24, 36, 60]);
+    const filerRate = Number(globalConfig.filerTaxRate) || 20.0;
+    const nonFilerRate = Number(globalConfig.nonFilerTaxRate) || 40.0;
+    return tenures.map(t => {
+      const rate = getApplicableRate(currentProduct, appliedDep, t);
+      const dRes = calculateDepositProfit(appliedDep, rate, t, isFilerCustomer, filerRate, nonFilerRate);
+      return {
+        category: 'liability',
+        tenure: t,
+        amount: appliedDep,
+        rate,
+        netMonthlyProfit: dRes.netMonthlyProfit,
+        totalTax: dRes.totalTax,
+        netTotalProfit: dRes.netTotalProfit,
+        netMaturity: dRes.netMaturityAmount,
+        taxRate: dRes.taxRate
+      };
+    });
+  }
+
+  const isAutoMaxMode = !hasManualAmt;
+  if (isAutoMaxMode && (income <= 0 || dbr <= 0)) return [];
+
+  const pMin = Math.max(1, Number(currentProduct.minTenure) || 1);
+  const pMax = Math.max(pMin, Number(currentProduct.maxTenure) || 36);
+  const effMaxEmi = (income > 0 && dbr > 0) ? (income * dbr) / 100.0 : 0;
+  const maxAllowedByAge = dobVal
+    ? (ageInfo.isEligible ? Math.min(pMax, ageInfo.remainingMonthsToMaturity) : 0)
+    : pMax;
+  const effectiveFed = Number(currentProduct.fedRate) || Number(globalConfig.fedRate) || 16.0;
+
+  const eligible = [];
+  for (let t = pMin; t <= pMax; t++) {
+    const pForT = getPrincipalForTenure(t);
+    if (pForT <= 0) continue;
+    const rForT = getApplicableRate(currentProduct, pForT, t);
+    const emiRes = calculateEmi(pForT, rForT, t, currentProduct.rateType);
+    const feeRes = calculateProcessingFee(currentProduct, pForT, effectiveFed);
+    const dbrVal = income > 0 ? ((emiRes.emi / income) * 100.0) : 0;
+    const isDbrFit = income > 0 ? (emiRes.emi <= effMaxEmi || dbrVal <= dbr + 0.05) : true;
+    const isAgeFit = dobVal ? (ageInfo.isEligible && t <= maxAllowedByAge) : true;
+    if (isDbrFit && isAgeFit) {
+      eligible.push({
+        category: 'asset',
+        tenure: t,
+        amount: pForT,
+        rate: rForT,
+        emi: emiRes.emi,
+        totalProfit: emiRes.totalProfit,
+        totalFee: feeRes.totalFee,
+        totalPayable: emiRes.totalPayable,
+        dbrVal
+      });
+    }
+  }
+  return eligible;
+}
+
+function updateDispatchModeBanner() {
+  const banner = document.getElementById('dispatchModeBanner');
+  if (!banner || !currentProduct) return;
+  const eligible = getEligiblePlansForDispatch();
+  const isAll = isAllEligibleDispatchMode();
+  if (isAll) {
+    banner.style.background = 'var(--success-soft)';
+    banner.style.borderColor = 'rgba(22, 163, 74, 0.45)';
+    banner.style.color = '#15803D';
+    banner.innerHTML = eligible.length > 0
+      ? `<span>📋 Send All Eligible Mode (${eligible.length} Plan${eligible.length === 1 ? '' : 's'})</span><span style="font-size:0.7rem;">Single Tenure ✕</span>`
+      : `<span>⚠️ No eligible matrix plans yet</span><span style="font-size:0.7rem;">Switch to Single ✕</span>`;
+  } else {
+    banner.style.background = 'var(--surface-subtle)';
+    banner.style.borderColor = 'var(--border)';
+    banner.style.color = 'var(--primary)';
+    banner.innerHTML = `<span>🎯 Single Plan: ${selectedMatrixTenure}M Preview</span><span style="font-size:0.7rem;color:var(--accent);">${eligible.length > 0 ? `Send All ${eligible.length} Plans ▸` : 'All Eligible Plans ▸'}</span>`;
+  }
 }
 
 function renderMatrixFilterChips(pMin, pMax) {
@@ -1131,16 +1257,34 @@ function shareSettlementWhatsApp() {
   const txt = buildSettlementText();
   const url = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(txt)}` : `https://wa.me/?text=${encodeURIComponent(txt)}`;
   openExternalWhatsAppUrl(url);
+  if (typeof autoSaveLeadFromAction === 'function') {
+    autoSaveLeadFromAction('whatsapp', '💬 Settlement WhatsApp', `Month ${amortState.selectedMonth || 1} settlement shared via WhatsApp`, {
+      overrideAmount: amortState.principal,
+      overrideTenure: amortState.tenure
+    });
+  }
 }
 
 function shareSettlementSMS() {
   const mob = document.getElementById('customerMobile').value.replace(/\D/g, '');
   const txt = buildSettlementText().replace(/\*/g, '');
   window.location.href = `sms:${mob}?body=${encodeURIComponent(txt)}`;
+  if (typeof autoSaveLeadFromAction === 'function') {
+    autoSaveLeadFromAction('sms', '✉️ Settlement SMS', `Month ${amortState.selectedMonth || 1} settlement sent via SMS`, {
+      overrideAmount: amortState.principal,
+      overrideTenure: amortState.tenure
+    });
+  }
 }
 
 function copySettlementSummary() {
   copyToClipboard(buildSettlementText(), '📋 Settlement summary copied!');
+  if (typeof autoSaveLeadFromAction === 'function') {
+    autoSaveLeadFromAction('copy', '📋 Settlement Copied', `Month ${amortState.selectedMonth || 1} settlement copied`, {
+      overrideAmount: amortState.principal,
+      overrideTenure: amortState.tenure
+    });
+  }
 }
 
 function buildAmortizationShareText(includeRows = false) {
@@ -1183,20 +1327,48 @@ function buildAmortizationShareText(includeRows = false) {
 
 function shareAmortizationWhatsApp(copyOnly = false) {
   const txt = buildAmortizationShareText(copyOnly);
+  const s = amortState.summary || {};
+  const effEmi = (s.totalExtraPaid > 0 && s.mode === 'reduce_emi') ? s.revisedMonthlyEmi : s.originalMonthlyEmi;
   if (copyOnly) {
     copyToClipboard(txt, '📋 Full Amortization text copied!');
+    if (typeof autoSaveLeadFromAction === 'function') {
+      autoSaveLeadFromAction('copy', '📋 Full Amortization Copied', `Copied ${amortState.tenure}M full schedule for PKR ${formatPKR(amortState.principal)}`, {
+        overrideAmount: amortState.principal,
+        overrideTenure: amortState.tenure,
+        overrideEmi: effEmi,
+        overrideProfit: s.revisedTotalProfit
+      });
+    }
     return;
   }
   const mob = document.getElementById('customerMobile').value.trim();
   const phone = formatForWhatsApp(mob);
   const url = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(txt)}` : `https://wa.me/?text=${encodeURIComponent(txt)}`;
   openExternalWhatsAppUrl(url);
+  if (typeof autoSaveLeadFromAction === 'function') {
+    autoSaveLeadFromAction('whatsapp', '💬 Amortization WhatsApp', `Shared ${amortState.tenure}M amortization via WhatsApp (${mob || 'customer'})`, {
+      overrideAmount: amortState.principal,
+      overrideTenure: amortState.tenure,
+      overrideEmi: effEmi,
+      overrideProfit: s.revisedTotalProfit
+    });
+  }
 }
 
 function shareAmortizationSMS() {
   const mob = document.getElementById('customerMobile').value.replace(/\D/g, '');
   const txt = buildAmortizationShareText(false).replace(/\*/g, '');
+  const s = amortState.summary || {};
+  const effEmi = (s.totalExtraPaid > 0 && s.mode === 'reduce_emi') ? s.revisedMonthlyEmi : s.originalMonthlyEmi;
   window.location.href = `sms:${mob}?body=${encodeURIComponent(txt)}`;
+  if (typeof autoSaveLeadFromAction === 'function') {
+    autoSaveLeadFromAction('sms', '✉️ Amortization SMS', `Sent ${amortState.tenure}M amortization via SMS (${mob || 'customer'})`, {
+      overrideAmount: amortState.principal,
+      overrideTenure: amortState.tenure,
+      overrideEmi: effEmi,
+      overrideProfit: s.revisedTotalProfit
+    });
+  }
 }
 
 // Print-Ready PDF Generator using @media print sheet
@@ -1266,6 +1438,17 @@ function printAmortizationPdf() {
       </tbody>
     </table>
   `;
+
+  if (typeof autoSaveLeadFromAction === 'function') {
+    const effEmi = (s.mode === 'reduce_emi' && s.totalExtraPaid > 0) ? s.revisedMonthlyEmi : s.originalMonthlyEmi;
+    autoSaveLeadFromAction('pdf', '📄 PDF Schedule Generated', `Printed/Shared ${amortState.tenure}M PDF schedule (PKR ${formatPKR(amortState.principal)})`, {
+      overrideAmount: amortState.principal,
+      overrideTenure: amortState.tenure,
+      overrideEmi: effEmi,
+      overrideProfit: s.revisedTotalProfit,
+      overrideFee: feeRes.totalFee
+    });
+  }
 
   window.print();
 }

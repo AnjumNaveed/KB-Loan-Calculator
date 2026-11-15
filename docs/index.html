@@ -392,9 +392,15 @@
             </div>
 
             <!-- Compact Active Preview Tenure Selector -->
-            <div class="tenure-dispatch-bar">
+            <div class="tenure-dispatch-bar" style="margin-bottom: 6px;">
               <label class="tenure-dispatch-label" for="tenureMonths">Active Preview Tenure</label>
               <select class="form-select tenure-dispatch-select" id="tenureMonths" onchange="onTenureSelectChange()"></select>
+            </div>
+            <div style="margin-bottom: 10px;">
+              <button type="button" id="dispatchModeBanner" onclick="toggleAllEligibleDispatchMode()" style="width: 100%; border: 1px solid var(--border); background: var(--surface-subtle); color: var(--primary); border-radius: 8px; padding: 6px 10px; font-size: 0.74rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 34px; text-align: left;">
+                <span>🎯 Single Plan Mode</span>
+                <span style="font-size: 0.7rem; opacity: 0.85;">Switch to All Eligible Plans ▸</span>
+              </button>
             </div>
 
             <!-- Live Selected Plan Quick Breakdown -->

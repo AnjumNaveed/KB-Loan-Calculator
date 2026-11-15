@@ -33,6 +33,7 @@ let currentLeadsScopeKey = '';
 let scopedLeadBuckets = new Map();
 let scopedBucketReady = new Set();
 let expectedScopedBuckets = new Set();
+const backgroundLeadSyncQueues = new Map();
 
 let globalConfig = {
   fedRate: 16.0,
@@ -969,6 +970,8 @@ async function verifyUserAccessAndSyncProfile(user, fetchFresh = false) {
 
     openOnboardingModalIfNeeded(user);
 
+    await sanitizeHijackedLeadOwnership();
+
     // Re-bind scoped Firestore leads listener if user's branch/role/staffId changed
     if (getCurrentLeadsScopeKey() !== currentLeadsScopeKey) {
       startFirestoreLeadsListener();
@@ -1461,6 +1464,9 @@ async function flushScopedBucketsToLocalDB() {
         const prev = mergedMap.get(leadId);
         const existing = localMap.get(leadId);
         const candidate = mapRemoteDocToLead(docSnap, existing);
+        if (currentUser && candidate.userId === currentUser.uid && String(candidate.id || '').startsWith('sheet-row-') && typeof isLeadOwnedByCurrentOfficer === 'function' && !isLeadOwnedByCurrentOfficer(candidate)) {
+          candidate.userId = '';
+        }
         if (!isLeadInAuthorizedScope(candidate)) continue;
         if (!prev || candidate.updatedAtMs >= prev.updatedAtMs) {
           mergedMap.set(leadId, candidate);
@@ -1712,16 +1718,89 @@ async function refreshLeadGps(leadId) {
   });
 }
 
-function buildCalculatorProposalText() {
+function formatCompactAllPlansSms(plans, cust, isLiab, offName, offBranch) {
+  let list = plans;
+  if (plans.length > 16) {
+    const picked = [];
+    const seen = new Set();
+    const addPlan = (p) => {
+      if (p && !seen.has(p.tenure)) {
+        seen.add(p.tenure);
+        picked.push(p);
+      }
+    };
+    addPlan(plans[0]);
+    plans.forEach(p => { if (p.tenure % 12 === 0) addPlan(p); });
+    addPlan(plans[plans.length - 1]);
+    list = picked.sort((a, b) => a.tenure - b.tenure);
+  }
+  const lines = [
+    `Dear ${cust}, KBL ${currentProduct.name} Eligible Plans:`
+  ];
+  list.forEach(p => {
+    if (isLiab) {
+      lines.push(`${p.tenure}M (${p.rate}%): Dep PKR ${formatPKR(p.amount)}, Net Mo PKR ${formatPKR(p.netMonthlyProfit)}, Payout PKR ${formatPKR(p.netMaturity)}`);
+    } else {
+      lines.push(`${p.tenure}M: PKR ${formatPKR(p.amount)}, EMI PKR ${formatPKR(p.emi)}, Fee PKR ${formatPKR(p.totalFee)}`);
+    }
+  });
+  if (list.length < plans.length) {
+    lines.push(`(${plans.length} eligible tenures total from ${plans[0].tenure}M to ${plans[plans.length - 1].tenure}M)`);
+  }
+  lines.push(`Contact: ${offName} (${offBranch})`);
+  return lines.join('\n');
+}
+
+function buildCalculatorProposalText(isSmsCompact = false) {
   if (!currentProduct || !lastCalculation) return '';
   const cust = toTitleCase(document.getElementById('customerName').value.trim() || 'Valued Customer');
   const isLiab = currentProduct.category === 'liability';
-  const emiOrProfit = isLiab ? (lastCalculation.netMonthlyProfit || 0) : (lastCalculation.emi || 0);
-  const feeOrTax = isLiab ? (lastCalculation.totalTax || 0) : (lastCalculation.totalFee || 0);
-  const totalOrMat = isLiab ? (lastCalculation.netMaturity || 0) : (lastCalculation.totalPayable || 0);
   const offName = toTitleCase(officerProfile.officerName || (currentUser && currentUser.displayName) || 'Officer');
   const offId = officerProfile.staffId || 'RO';
   const offBranch = officerProfile.branchName || (currentUserProfile && currentUserProfile.branchName) || 'KBL Branch';
+
+  if (typeof isAllEligibleDispatchMode === 'function' && isAllEligibleDispatchMode() && typeof getEligiblePlansForDispatch === 'function') {
+    const plans = getEligiblePlansForDispatch();
+    if (plans && plans.length > 0) {
+      if (isSmsCompact) {
+        return formatCompactAllPlansSms(plans, cust, isLiab, offName, offBranch);
+      }
+      const header = [
+        `السلام علیکم جناب *${cust}*،`,
+        `*KBL Financing & Deposit Services*`,
+        ``,
+        `آپ کے لیے *${currentProduct.name}* کے تمام اہل (${plans.length}) پلانز:`
+      ];
+      if (!isLiab && plans[0].dbrVal !== undefined && lastCalculation.monthlyIncome > 0) {
+        header.push(`(آمدنی: PKR ${formatPKR(lastCalculation.monthlyIncome)} • DBR حد: ${lastCalculation.allowedDbr || 50}%)`);
+      }
+      header.push(`────────────────────`);
+
+      const planLines = plans.map(p => {
+        if (isLiab) {
+          return `• *${p.tenure} ماہ* (${p.rate}%): رقم *PKR ${formatPKR(p.amount)}* | ماہانہ منافع *PKR ${formatPKR(p.netMonthlyProfit)}* | کل واپسی *PKR ${formatPKR(p.netMaturity)}*`;
+        }
+        return `• *${p.tenure} ماہ*: رقم *PKR ${formatPKR(p.amount)}* | قسط *PKR ${formatPKR(p.emi)}* | فیس *PKR ${formatPKR(p.totalFee)}*`;
+      });
+
+      return [
+        ...header,
+        ...planLines,
+        `────────────────────`,
+        `مزید تفصیل یا منتخب پلان کے لیے رابطہ فرمائیں۔ شکریہ!`,
+        `آفیسر: ${offName} (${offId})`,
+        `برانچ: ${offBranch}`
+      ].join('\n');
+    }
+  }
+
+  const emiOrProfit = isLiab ? (lastCalculation.netMonthlyProfit || 0) : (lastCalculation.emi || 0);
+  const feeOrTax = isLiab ? (lastCalculation.totalTax || 0) : (lastCalculation.totalFee || 0);
+  const totalOrMat = isLiab ? (lastCalculation.netMaturity || 0) : (lastCalculation.totalPayable || 0);
+
+  if (isSmsCompact) {
+    return `Dear ${cust}, KBL Quotation: ${currentProduct.name}, Amount: PKR ${formatPKR(lastCalculation.amount)}, Tenure: ${lastCalculation.tenure}M, Monthly: PKR ${formatPKR(emiOrProfit)}. Contact: ${offName} (${offBranch})`;
+  }
 
   return [
     `السلام علیکم جناب *${cust}*،`,
@@ -1748,57 +1827,137 @@ function buildCalculatorProposalText() {
   ].join('\n');
 }
 
-function copyProposalText() {
-  const txt = buildCalculatorProposalText();
-  if (!txt) {
-    showToast('Calculate a plan first.');
-    return;
-  }
-  copyToClipboard(txt, '📋 Proposal quotation copied to clipboard!');
+function enqueueBackgroundLeadSync(leadId, opts = {}) {
+  if (!leadId) return Promise.resolve(null);
+  const prevChain = backgroundLeadSyncQueues.get(leadId) || Promise.resolve();
+  const nextChain = prevChain.then(async () => {
+    try {
+      const leads = await LocalDB.getAllLeads();
+      let lead = leads.find(l => l.id === leadId);
+      if (!lead) return null;
+
+      if (opts.captureGps) {
+        const isStale = !lead.locationCapturedAt || (Date.now() - lead.locationCapturedAt > 300000);
+        if (lead.latitude === null || lead.latitude === undefined || !lead.locationAddress || isStale) {
+          const freshLoc = await captureBrowserLocation(4500);
+          if (freshLoc) {
+            const latestList = await LocalDB.getAllLeads();
+            lead = latestList.find(l => l.id === leadId) || lead;
+            lead.latitude = freshLoc.latitude;
+            lead.longitude = freshLoc.longitude;
+            lead.locationAddress = freshLoc.locationAddress;
+            lead.locationCapturedAt = freshLoc.locationCapturedAt;
+            lead.updatedAtMs = Date.now();
+            await LocalDB.saveLead(lead);
+          }
+        }
+      }
+
+      let firestoreSaved = false;
+      if (fb && currentUser && navigator.onLine) {
+        try {
+          const syncTs = Date.now();
+          await Promise.race([
+            fb.setDoc('leads', lead.id, {
+              ...lead,
+              syncStatus: 'synced',
+              updatedAtMs: Math.max(Number(lead.updatedAtMs) || 0, syncTs),
+              updatedAt: fb.serverTimestamp()
+            }, true),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('Cloud timeout')), 8000))
+          ]);
+          lead.syncStatus = 'synced';
+          firestoreSaved = true;
+          lastCloudSyncTime = Date.now();
+          await LocalDB.saveLead(lead);
+        } catch (e) {
+          console.warn('Background Firestore lead sync notice:', e);
+        }
+      }
+
+      let sheetSaved = false;
+      const webhookUrl = getEffectiveWebhookUrl();
+      if (navigator.onLine && webhookUrl) {
+        sheetSaved = await syncLeadToSheet(lead, true);
+      }
+
+      await renderLeads();
+      await updateSettingsStats();
+
+      if (opts.notifySuccess) {
+        const label = opts.successLabel || lead.customerName || 'Lead';
+        if (firestoreSaved && (!webhookUrl || sheetSaved)) {
+          showToast(`✅ ${label} synced to Cloud${sheetSaved ? ' + Google Sheet' : ''}!`);
+        } else if (firestoreSaved && webhookUrl && !sheetSaved) {
+          showToast(`✅ Saved to Cloud (Sheet sync retrying later).`);
+        }
+      }
+      return lead;
+    } catch (err) {
+      console.warn('Background lead queue error:', err);
+      return null;
+    }
+  });
+
+  backgroundLeadSyncQueues.set(leadId, nextChain.catch(() => null));
+  return nextChain;
 }
 
-async function saveLeadFromCalculator(silent = false) {
-  const rawCustName = document.getElementById('customerName').value.trim();
-  const custName = toTitleCase(rawCustName);
-  const mobile = document.getElementById('customerMobile').value.trim();
-  const dob = document.getElementById('customerDob').value;
-  const notes = document.getElementById('leadNotes').value.trim();
-  const monthlyIncome = parseFloat(document.getElementById('monthlyIncome').value) || 0;
-  const allowedDbr = parseFloat(document.getElementById('allowedDbr').value) || 0;
+async function upsertLeadToLocalAndQueueSync(options = {}) {
+  const {
+    rawCustName = '',
+    mobile = '',
+    dob = '',
+    notes = '',
+    monthlyIncome = 0,
+    allowedDbr = 0,
+    activity = null,
+    clearForm = false,
+    notifySave = false,
+    overrideAmount = null,
+    overrideTenure = null,
+    overrideEmi = null,
+    overrideProfit = null,
+    overrideFee = null
+  } = options;
 
-  if (!custName) {
-    if (!silent) showToast('⚠️ Please enter customer name (گاہک کا نام درج کریں).');
-    return null;
-  }
-  if (!mobile) {
-    if (!silent) showToast('⚠️ Please enter mobile number (موبائل نمبر درج کریں).');
-    return null;
-  }
-  if (!lastCalculation || lastCalculation.amount <= 0) {
-    if (!silent) showToast('⚠️ Enter Income & DBR or Desired Amount first.');
-    return null;
-  }
+  if (!currentProduct) return null;
 
-  const runSave = async () => {
-    const ageInfo = calculateDetailedAge(dob);
-    const existingLeads = await LocalDB.getAllLeads();
-    let lead = existingLeads.find(l => l.mobile === mobile || (l.customerName.toLowerCase() === custName.toLowerCase() && l.productName === currentProduct.name));
+  const custName = toTitleCase(rawCustName || (mobile ? 'Walk-In Customer' : 'Customer'));
+  const ageInfo = calculateDetailedAge(dob);
+  const existingLeads = await LocalDB.getAllLeads();
+  const phoneKey = cleanPhoneDigits(mobile);
 
-    const effOffName = toTitleCase(officerProfile.officerName || (currentUser && currentUser.displayName) || 'Loan Officer');
-    const effOffId = officerProfile.staffId || 'RO';
-    const effBranch = officerProfile.branchName || (currentUserProfile && currentUserProfile.branchName) || '';
+  let lead = existingLeads.find(l => {
+    if (phoneKey && cleanPhoneDigits(l.mobile) === phoneKey) return true;
+    if (!phoneKey && rawCustName && (l.customerName || '').trim().toLowerCase() === custName.toLowerCase() && l.productName === currentProduct.name) {
+      return true;
+    }
+    return false;
+  });
 
+  const effOffName = toTitleCase(officerProfile.officerName || (currentUser && currentUser.displayName) || 'Loan Officer');
+  const effOffId = officerProfile.staffId || 'RO';
+  const effBranch = officerProfile.branchName || (currentUserProfile && currentUserProfile.branchName) || '';
   const now = Date.now();
   const cleanNote = cleanRawActionPayload(notes);
-  const loc = await captureBrowserLocation(silent ? 3500 : 5500);
+  const cachedLoc = lastKnownGeoLocation;
 
   const isLiab = currentProduct.category === 'liability';
-  const effEmi = isLiab ? (lastCalculation.netMonthlyProfit || 0) : (lastCalculation.emi || 0);
-  const effProfit = isLiab ? (lastCalculation.netTotalProfit || 0) : (lastCalculation.totalProfit || 0);
-  const effFee = isLiab ? (lastCalculation.totalTax || 0) : (lastCalculation.totalFee || 0);
+  const calcObj = lastCalculation || {};
+  const effAmount = (overrideAmount !== null && overrideAmount > 0) ? overrideAmount : (calcObj.amount || 0);
+  const effTenure = (overrideTenure !== null && overrideTenure > 0) ? overrideTenure : (calcObj.tenure || selectedMatrixTenure || 12);
+  const effEmi = (overrideEmi !== null && overrideEmi > 0) ? overrideEmi : (isLiab ? (calcObj.netMonthlyProfit || 0) : (calcObj.emi || 0));
+  const effProfit = (overrideProfit !== null && overrideProfit > 0) ? overrideProfit : (isLiab ? (calcObj.netTotalProfit || 0) : (calcObj.totalProfit || 0));
+  const effFee = (overrideFee !== null && overrideFee >= 0) ? overrideFee : (isLiab ? (calcObj.totalTax || 0) : (calcObj.totalFee || 0));
+
+  if (effAmount <= 0) return null;
+
+  const extraNoteText = (cleanNote && (!lead || cleanRawActionPayload(lead.notes || '') !== cleanNote));
 
   if (lead) {
-    lead.customerName = custName;
+    if (rawCustName) lead.customerName = custName;
+    if (mobile) lead.mobile = mobile;
     lead.dob = dob || lead.dob || '';
     lead.age = ageInfo.years || lead.age || 0;
     lead.monthlyIncome = monthlyIncome || lead.monthlyIncome || 0;
@@ -1806,25 +1965,27 @@ async function saveLeadFromCalculator(silent = false) {
     lead.category = currentProduct.category;
     lead.productId = currentProduct.id;
     lead.productName = currentProduct.name;
-    lead.loanAmount = lastCalculation.amount;
-    lead.tenureMonths = lastCalculation.tenure;
+    lead.loanAmount = effAmount;
+    lead.tenureMonths = effTenure;
     lead.monthlyEmi = effEmi;
     lead.totalProfit = effProfit;
     lead.processingFee = effFee;
     lead.isFiler = isLiab ? isFilerCustomer : true;
-    lead.taxRate = isLiab ? (lastCalculation.taxRate || 0) : 0;
-    lead.taxDeducted = isLiab ? (lastCalculation.totalTax || 0) : 0;
-    lead.netProfit = isLiab ? (lastCalculation.netTotalProfit || 0) : 0;
-    if (loc) {
-      lead.latitude = loc.latitude;
-      lead.longitude = loc.longitude;
-      lead.locationAddress = loc.locationAddress;
-      lead.locationCapturedAt = loc.locationCapturedAt;
+    lead.taxRate = isLiab ? (calcObj.taxRate || 0) : 0;
+    lead.taxDeducted = isLiab ? (calcObj.totalTax || 0) : 0;
+    lead.netProfit = isLiab ? (calcObj.netTotalProfit || 0) : 0;
+    if (cachedLoc && (lead.latitude === null || lead.latitude === undefined)) {
+      lead.latitude = cachedLoc.latitude;
+      lead.longitude = cachedLoc.longitude;
+      lead.locationAddress = cachedLoc.locationAddress;
+      lead.locationCapturedAt = cachedLoc.locationCapturedAt;
     }
     lead.syncStatus = 'pending_sync';
+    lead.sheetsSynced = false;
+    lead.approachCount = (Number(lead.approachCount) || 1) + 1;
     if (!lead.activities) lead.activities = [];
 
-    if (cleanNote) {
+    if (extraNoteText) {
       lead.notes = cleanNote;
       lead.notesUpdateCount = (lead.notesUpdateCount || 0) + 1;
       lead.activities.push({
@@ -1837,15 +1998,18 @@ async function saveLeadFromCalculator(silent = false) {
         officerId: effOffId
       });
     }
-    lead.activities.push({
-      id: 'prop-' + now,
-      timestamp: now,
-      actionType: 'proposal_update',
-      title: '📋 Proposal Saved',
-      details: `${currentProduct.name} (PKR ${formatPKR(lastCalculation.amount)}, ${lastCalculation.tenure}M)`,
-      officerName: effOffName,
-      officerId: effOffId
-    });
+
+    if (activity) {
+      lead.activities.push({
+        id: 'act-' + now + '-' + Math.random().toString(36).substring(2, 5),
+        timestamp: now + 1,
+        actionType: activity.actionType || 'proposal_update',
+        title: activity.title || '📋 Proposal Saved',
+        details: activity.details || `${currentProduct.name} (PKR ${formatPKR(effAmount)}, ${effTenure}M)`,
+        officerName: effOffName,
+        officerId: effOffId
+      });
+    }
   } else {
     const id = 'kb-lead-' + now + '-' + Math.random().toString(36).substring(2, 7);
     const initialActivities = [];
@@ -1865,10 +2029,21 @@ async function saveLeadFromCalculator(silent = false) {
       timestamp: now,
       actionType: 'created',
       title: isLiab ? '🎯 Deposit Lead Created' : '🎯 Loan Lead Created',
-      details: `${currentProduct.name} (PKR ${formatPKR(lastCalculation.amount)}, ${lastCalculation.tenure}M)`,
+      details: `${currentProduct.name} (PKR ${formatPKR(effAmount)}, ${effTenure}M)`,
       officerName: effOffName,
       officerId: effOffId
     });
+    if (activity && activity.actionType !== 'proposal_update') {
+      initialActivities.push({
+        id: 'act-' + (now + 1) + '-' + Math.random().toString(36).substring(2, 5),
+        timestamp: now + 1,
+        actionType: activity.actionType,
+        title: activity.title,
+        details: activity.details,
+        officerName: effOffName,
+        officerId: effOffId
+      });
+    }
 
     lead = {
       id,
@@ -1881,15 +2056,15 @@ async function saveLeadFromCalculator(silent = false) {
       category: currentProduct.category,
       productId: currentProduct.id,
       productName: currentProduct.name,
-      loanAmount: lastCalculation.amount,
-      tenureMonths: lastCalculation.tenure,
+      loanAmount: effAmount,
+      tenureMonths: effTenure,
       monthlyEmi: effEmi,
       totalProfit: effProfit,
       processingFee: effFee,
       isFiler: isLiab ? isFilerCustomer : true,
-      taxRate: isLiab ? (lastCalculation.taxRate || 0) : 0,
-      taxDeducted: isLiab ? (lastCalculation.totalTax || 0) : 0,
-      netProfit: isLiab ? (lastCalculation.netTotalProfit || 0) : 0,
+      taxRate: isLiab ? (calcObj.taxRate || 0) : 0,
+      taxDeducted: isLiab ? (calcObj.totalTax || 0) : 0,
+      netProfit: isLiab ? (calcObj.netTotalProfit || 0) : 0,
       status: 'New',
       followUpDate: '',
       notes: cleanNote,
@@ -1897,10 +2072,10 @@ async function saveLeadFromCalculator(silent = false) {
       officerId: effOffId,
       branchName: effBranch,
       userId: currentUser ? currentUser.uid : 'web-officer',
-      latitude: loc ? loc.latitude : null,
-      longitude: loc ? loc.longitude : null,
-      locationAddress: loc ? loc.locationAddress : '',
-      locationCapturedAt: loc ? loc.locationCapturedAt : 0,
+      latitude: cachedLoc ? cachedLoc.latitude : null,
+      longitude: cachedLoc ? cachedLoc.longitude : null,
+      locationAddress: cachedLoc ? cachedLoc.locationAddress : '',
+      locationCapturedAt: cachedLoc ? cachedLoc.locationCapturedAt : 0,
       createdAt: now,
       updatedAtMs: now,
       syncStatus: 'pending_sync',
@@ -1915,45 +2090,7 @@ async function saveLeadFromCalculator(silent = false) {
   lead.sheetsSynced = false;
   await LocalDB.saveLead(lead);
 
-  let firestoreSaved = false;
-  let firestoreErrMsg = '';
-  if (fb && currentUser && navigator.onLine) {
-    try {
-      await Promise.race([
-        fb.setDoc('leads', lead.id, {
-          ...lead,
-          syncStatus: 'synced',
-          updatedAtMs: now,
-          updatedAt: fb.serverTimestamp()
-        }, true),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('Cloud timeout')), 8000))
-      ]);
-      lead.syncStatus = 'synced';
-      firestoreSaved = true;
-      lastCloudSyncTime = Date.now();
-      await LocalDB.saveLead(lead);
-    } catch (e) {
-      firestoreErrMsg = e && e.message ? e.message : 'Cloud unreachable';
-      console.warn('Firestore write warning:', e);
-    }
-  } else {
-    firestoreErrMsg = !currentUser ? 'Not signed in' : (!navigator.onLine ? 'Offline' : 'Cloud initializing');
-  }
-
-  let sheetSaved = false;
-  const webhookUrl = getEffectiveWebhookUrl();
-  if (navigator.onLine && webhookUrl) {
-    sheetSaved = await syncLeadToSheet(lead, true);
-  }
-
-  if (!silent) {
-    if (firestoreSaved && (!webhookUrl || sheetSaved)) {
-      showToast(`✅ Lead for ${custName} saved & synced to Cloud${sheetSaved ? ' + Sheets' : ''}!`);
-    } else if (firestoreSaved && webhookUrl && !sheetSaved) {
-      showToast(`✅ Saved to Cloud, ⚠️ Google Sheet push pending (check Webhook URL).`);
-    } else {
-      showToast(`💾 Saved locally (${firestoreErrMsg || 'Pending Sync'}). Tap Sync when online.`);
-    }
+  if (clearForm) {
     document.getElementById('customerName').value = '';
     document.getElementById('customerMobile').value = '';
     document.getElementById('customerDob').value = '';
@@ -1963,16 +2100,111 @@ async function saveLeadFromCalculator(silent = false) {
 
   await renderLeads();
   await updateSettingsStats();
-  return lead;
-  };
 
-  if (silent) {
-    return await runSave();
-  }
-  return await withLoading('Capturing GPS & Saving Lead...', runSave);
+  enqueueBackgroundLeadSync(lead.id, {
+    captureGps: true,
+    notifySuccess: notifySave,
+    successLabel: custName
+  });
+
+  return lead;
 }
 
-// 11. POPUP-FREE WHATSAPP & SMS QUOTATIONS WITH BACKGROUND LEAD SAVE & APPROACH LOGGING
+function autoSaveLeadFromAction(actionType, actionTitle, actionDetail, opts = {}) {
+  const rawCustName = (document.getElementById('customerName')?.value || '').trim();
+  const mobile = (document.getElementById('customerMobile')?.value || '').trim();
+  if (!rawCustName && !mobile) {
+    showToast('ℹ️ Shared! Enter Customer Name or Mobile to auto-save as Lead.');
+    return Promise.resolve(null);
+  }
+  const dob = document.getElementById('customerDob')?.value || '';
+  const notes = (document.getElementById('leadNotes')?.value || '').trim();
+  const monthlyIncome = parseFloat(document.getElementById('monthlyIncome')?.value) || 0;
+  const allowedDbr = parseFloat(document.getElementById('allowedDbr')?.value) || 0;
+
+  return upsertLeadToLocalAndQueueSync({
+    rawCustName,
+    mobile,
+    dob,
+    notes,
+    monthlyIncome,
+    allowedDbr,
+    activity: {
+      actionType,
+      title: actionTitle,
+      details: actionDetail
+    },
+    clearForm: false,
+    notifySave: false,
+    ...opts
+  }).then(saved => {
+    if (saved) {
+      showToast(`💾 Lead auto-saved & syncing (${saved.customerName})...`);
+    }
+    return saved;
+  }).catch(e => {
+    console.warn('Background auto-save warning:', e);
+    return null;
+  });
+}
+
+function copyProposalText() {
+  const txt = buildCalculatorProposalText(false);
+  if (!txt) {
+    showToast('Calculate a plan first.');
+    return;
+  }
+  copyToClipboard(txt, '📋 Proposal quotation copied to clipboard!');
+  const modeLabel = (typeof isAllEligibleDispatchMode === 'function' && isAllEligibleDispatchMode())
+    ? 'All Eligible Plans'
+    : `${lastCalculation.tenure}M`;
+  autoSaveLeadFromAction('copy', '📋 Proposal Copied', `Copied ${currentProduct.name} (${modeLabel}, PKR ${formatPKR(lastCalculation.amount)})`);
+}
+
+function saveLeadFromCalculator(silent = false) {
+  const rawCustName = document.getElementById('customerName').value.trim();
+  const mobile = document.getElementById('customerMobile').value.trim();
+  const dob = document.getElementById('customerDob').value;
+  const notes = document.getElementById('leadNotes').value.trim();
+  const monthlyIncome = parseFloat(document.getElementById('monthlyIncome').value) || 0;
+  const allowedDbr = parseFloat(document.getElementById('allowedDbr').value) || 0;
+
+  if (!rawCustName) {
+    if (!silent) showToast('⚠️ Please enter customer name (گاہک کا نام درج کریں).');
+    return Promise.resolve(null);
+  }
+  if (!mobile) {
+    if (!silent) showToast('⚠️ Please enter mobile number (موبائل نمبر درج کریں).');
+    return Promise.resolve(null);
+  }
+  if (!lastCalculation || lastCalculation.amount <= 0) {
+    if (!silent) showToast('⚠️ Enter Income & DBR or Desired Amount first.');
+    return Promise.resolve(null);
+  }
+
+  const custTitle = toTitleCase(rawCustName);
+  if (!silent) {
+    showToast(`💾 Saving ${custTitle}... Cloud & GPS syncing in background`);
+  }
+
+  return upsertLeadToLocalAndQueueSync({
+    rawCustName,
+    mobile,
+    dob,
+    notes,
+    monthlyIncome,
+    allowedDbr,
+    activity: {
+      actionType: 'proposal_update',
+      title: '📋 Proposal Saved',
+      details: `${currentProduct.name} (PKR ${formatPKR(lastCalculation.amount)}, ${lastCalculation.tenure}M)`
+    },
+    clearForm: !silent,
+    notifySave: !silent
+  });
+}
+
+// 11. POPUP-FREE WHATSAPP, SMS & CALL WITH INSTANT EXECUTION & BACKGROUND SYNC
 function openExternalWhatsAppUrl(url) {
   let opened = null;
   try {
@@ -2025,17 +2257,13 @@ function sendQuotationWhatsApp(leadId = null) {
       ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msgText)}`
       : `https://wa.me/?text=${encodeURIComponent(msgText)}`;
 
-    // Synchronous open during direct user click prevents browser popup blockers
     openExternalWhatsAppUrl(url);
-
-    // Log approach asynchronously in background
     logApproach(leadId, 'whatsapp', '💬 WhatsApp Quotation', `Quotation sent via WhatsApp to ${mobile}`).catch(e => console.warn(e));
     return;
   }
 
   mobile = document.getElementById('customerMobile').value.trim();
-  const custName = document.getElementById('customerName').value.trim();
-  msgText = buildCalculatorProposalText();
+  msgText = buildCalculatorProposalText(false);
   if (!msgText) {
     showToast('Calculate a plan first.');
     return;
@@ -2046,17 +2274,12 @@ function sendQuotationWhatsApp(leadId = null) {
     ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msgText)}`
     : `https://wa.me/?text=${encodeURIComponent(msgText)}`;
 
-  // Synchronous open during direct user click prevents browser popup blockers
   openExternalWhatsAppUrl(url);
 
-  // Save lead and log approach asynchronously in background
-  if (custName && mobile) {
-    saveLeadFromCalculator(true).then(saved => {
-      if (saved) {
-        return logApproach(saved.id, 'whatsapp', '💬 WhatsApp Quotation', `Proposal shared on WhatsApp (${mobile})`);
-      }
-    }).catch(e => console.warn('Background WhatsApp lead save warning:', e));
-  }
+  const modeLabel = (typeof isAllEligibleDispatchMode === 'function' && isAllEligibleDispatchMode())
+    ? 'All Eligible Plans'
+    : `${lastCalculation.tenure}M`;
+  autoSaveLeadFromAction('whatsapp', '💬 WhatsApp Quotation', `Shared ${currentProduct.name} (${modeLabel}) on WhatsApp (${mobile || 'customer'})`);
 }
 
 function sendQuotationSMS(leadId = null) {
@@ -2071,36 +2294,37 @@ function sendQuotationSMS(leadId = null) {
     mobile = lead.mobile || '';
     smsBody = `Dear ${lead.customerName}, KBL Quotation: ${lead.productName}, Amount: PKR ${formatPKR(lead.loanAmount)}, Tenure: ${lead.tenureMonths}M, Monthly: PKR ${formatPKR(lead.monthlyEmi)}. Contact: ${offName} (${offBranch})`;
 
-    const cleanPhone = mobile.replace(/\D/g, '');
+    const cleanPhone = mobile.replace(/[^\d+]/g, '');
     window.location.href = `sms:${cleanPhone}?body=${encodeURIComponent(smsBody)}`;
     logApproach(leadId, 'sms', '✉️ SMS Quotation', `SMS quotation sent to ${mobile}`).catch(e => console.warn(e));
     return;
   }
 
-  const custName = document.getElementById('customerName').value.trim() || 'Customer';
   mobile = document.getElementById('customerMobile').value.trim();
-  if (!lastCalculation || lastCalculation.amount <= 0) {
+  smsBody = buildCalculatorProposalText(true).replace(/\*/g, '');
+  if (!smsBody) {
     showToast('Calculate a plan first.');
     return;
   }
-  const emiVal = lastCalculation.emi || lastCalculation.netMonthlyProfit || 0;
-  smsBody = `Dear ${custName}, KBL Quotation: ${currentProduct.name}, Amount: PKR ${formatPKR(lastCalculation.amount)}, Tenure: ${lastCalculation.tenure}M, Monthly: PKR ${formatPKR(emiVal)}. Contact: ${offName} (${offBranch})`;
 
-  const cleanPhone = mobile.replace(/\D/g, '');
+  const cleanPhone = mobile.replace(/[^\d+]/g, '');
   window.location.href = `sms:${cleanPhone}?body=${encodeURIComponent(smsBody)}`;
 
-  if (document.getElementById('customerName').value.trim() && mobile) {
-    saveLeadFromCalculator(true).then(saved => {
-      if (saved) {
-        return logApproach(saved.id, 'sms', '✉️ SMS Quotation', `SMS quotation sent (${mobile})`);
-      }
-    }).catch(e => console.warn('Background SMS lead save warning:', e));
-  }
+  const modeLabel = (typeof isAllEligibleDispatchMode === 'function' && isAllEligibleDispatchMode())
+    ? 'All Eligible Plans'
+    : `${lastCalculation.tenure}M`;
+  autoSaveLeadFromAction('sms', '✉️ SMS Quotation', `Sent ${currentProduct.name} (${modeLabel}) via SMS (${mobile || 'customer'})`);
 }
 
-async function initiateCall(leadId, mobile) {
-  await logApproach(leadId, 'call', '📞 Phone Call', `Phone call initiated to ${mobile}`);
-  window.location.href = `tel:${String(mobile || '').replace(/\D/g, '')}`;
+function initiateCall(leadId, mobile) {
+  const cleanPhone = String(mobile || '').trim().replace(/[^\d+]/g, '');
+  if (!cleanPhone) {
+    showToast('⚠️ Valid mobile number not found for this lead.');
+    return;
+  }
+  // Launch native phone dialer synchronously before any DB or network work
+  window.location.href = `tel:${cleanPhone}`;
+  logApproach(leadId, 'call', '📞 Phone Call', `Phone call initiated to ${mobile}`).catch(e => console.warn(e));
 }
 
 async function logApproach(leadId, type, title, detail) {
@@ -2116,7 +2340,7 @@ async function logApproach(leadId, type, title, detail) {
   if (!lead.activities) lead.activities = [];
 
   lead.activities.push({
-    id: 'act-' + now,
+    id: 'act-' + now + '-' + Math.random().toString(36).substring(2, 5),
     timestamp: now,
     actionType: type,
     title,
@@ -2126,25 +2350,9 @@ async function logApproach(leadId, type, title, detail) {
   });
 
   await LocalDB.saveLead(lead);
-
-  if (fb && currentUser && navigator.onLine) {
-    try {
-      await fb.setDoc('leads', lead.id, {
-        ...lead,
-        syncStatus: 'synced',
-        updatedAtMs: now,
-        updatedAt: fb.serverTimestamp()
-      }, true);
-      lead.syncStatus = 'synced';
-      await LocalDB.saveLead(lead);
-    } catch (e) {
-      console.warn('Firestore activity sync notice:', e);
-    }
-  }
-
   await renderLeads();
   await updateSettingsStats();
-  if (navigator.onLine && getEffectiveWebhookUrl()) syncLeadToSheet(lead, true);
+  enqueueBackgroundLeadSync(lead.id, { captureGps: false });
 }
 
 // 12. LEAD STATUS, NOTE & FOLLOW-UP ACTIONS
@@ -2567,6 +2775,28 @@ function isSheetLeadAuthorizedForCurrentUser(lead) {
   return tokens.some(tok => typeof isBranchAuthorizedForQuery === 'function' && isBranchAuthorizedForQuery(tok, leadBranch));
 }
 
+async function sanitizeHijackedLeadOwnership() {
+  if (!currentUser) return;
+  try {
+    const localLeads = await LocalDB.getAllLeads();
+    for (const lead of localLeads) {
+      if (lead.userId === currentUser.uid) {
+        const isSheet = String(lead.id || '').startsWith('sheet-row-');
+        const ownsStrictly = isLeadOwnedByCurrentOfficer(lead);
+        if (!ownsStrictly && (isSheet || lead.officerName || lead.officerId)) {
+          lead.userId = '';
+          await LocalDB.saveLead(lead);
+          if (isSheet && fb && navigator.onLine) {
+            fb.setDoc('leads', lead.id, { userId: '' }, true).catch(() => {});
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Ownership sanitization notice:', e);
+  }
+}
+
 async function pullLeadsFromGoogleSheet(silent = false) {
   const url = getEffectiveWebhookUrl();
   if (!url) {
@@ -2627,7 +2857,10 @@ async function pullLeadsFromGoogleSheet(silent = false) {
       const match = byId.get(candidate.id) || (phoneKey ? byPhone.get(phoneKey) : null);
 
       if (!match) {
-        if (!candidate.userId && currentUser) candidate.userId = currentUser.uid;
+        // Only attach currentUser.uid when the Sheet row genuinely belongs to the current officer
+        if (!candidate.userId && currentUser && typeof isLeadOwnedByCurrentOfficer === 'function' && isLeadOwnedByCurrentOfficer(candidate)) {
+          candidate.userId = currentUser.uid;
+        }
         await LocalDB.saveLead(candidate);
         byId.set(candidate.id, candidate);
         if (phoneKey) byPhone.set(phoneKey, candidate);
@@ -2649,6 +2882,10 @@ async function pullLeadsFromGoogleSheet(silent = false) {
       } else {
         // Fill missing metadata without clobbering newer Firestore/local state
         let changed = false;
+        if (currentUser && match.userId === currentUser.uid && String(match.id || '').startsWith('sheet-row-') && !isLeadOwnedByCurrentOfficer(match)) {
+          match.userId = '';
+          changed = true;
+        }
         if (!match.notes && candidate.notes) { match.notes = candidate.notes; changed = true; }
         if (!match.locationAddress && candidate.locationAddress) { match.locationAddress = candidate.locationAddress; changed = true; }
         if ((match.latitude === null || match.latitude === undefined) && candidate.latitude !== null) {

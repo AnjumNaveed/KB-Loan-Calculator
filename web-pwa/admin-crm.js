@@ -234,11 +234,51 @@ function isSupervisorQueryAllowed(queryBranch) {
 }
 
 function isLeadOwnedByCurrentOfficer(lead) {
-  const uidMatch = currentUser && lead.userId && lead.userId === currentUser.uid;
-  const staffMatch = officerProfile.staffId && lead.officerId &&
-    lead.officerId.trim().toLowerCase() === officerProfile.staffId.trim().toLowerCase();
-  const nameMatch = officerProfile.officerName && lead.officerName &&
-    lead.officerName.trim().toLowerCase() === officerProfile.officerName.trim().toLowerCase();
+  if (!lead) return false;
+  const genericTokens = new Set([
+    '', 'ro', 'ro-001', 'officer', 'loan officer', 'kbl officer', 'user', 'unknown', 'n/a', 'na', 'staff'
+  ]);
+  const myUid = currentUser && currentUser.uid ? String(currentUser.uid).trim() : '';
+  const myStaff = String(
+    officerProfile.staffId || (currentUserProfile && currentUserProfile.staffId) || ''
+  ).trim().toLowerCase();
+  const myName = String(
+    officerProfile.officerName || (currentUserProfile && currentUserProfile.officerName) || (currentUser && currentUser.displayName) || ''
+  ).trim().toLowerCase();
+
+  const leadId = String(lead.id || '').trim();
+  const leadUid = String(lead.userId || '').trim();
+  const leadStaff = String(lead.officerId || '').trim().toLowerCase();
+  const leadName = String(lead.officerName || '').trim().toLowerCase();
+
+  const hasValidMyStaff = Boolean(myStaff) && !genericTokens.has(myStaff);
+  const hasValidLeadStaff = Boolean(leadStaff) && !genericTokens.has(leadStaff);
+  const hasValidMyName = Boolean(myName) && !genericTokens.has(myName);
+  const hasValidLeadName = Boolean(leadName) && !genericTokens.has(leadName);
+
+  const staffMatch = hasValidMyStaff && hasValidLeadStaff && myStaff === leadStaff;
+  const nameMatch = hasValidMyName && hasValidLeadName && myName === leadName &&
+    !(hasValidMyStaff && hasValidLeadStaff && myStaff !== leadStaff);
+
+  const staffConflict = hasValidMyStaff && hasValidLeadStaff && myStaff !== leadStaff;
+  const nameConflict = hasValidMyName && hasValidLeadName && myName !== leadName;
+  const isSheetImported = leadId.startsWith('sheet-row-');
+
+  let uidMatch = false;
+  if (myUid && leadUid === myUid) {
+    if (isSheetImported) {
+      // Never trust UID stamped on Sheet-imported leads unless officer Staff ID or Name also matches
+      uidMatch = staffMatch || nameMatch;
+    } else if (staffConflict || (!staffMatch && nameConflict)) {
+      // Reject hijacked UID when lead explicitly names a different officer
+      uidMatch = false;
+    } else {
+      uidMatch = true;
+    }
+  } else if (!myUid && !hasValidMyStaff && !hasValidMyName) {
+    uidMatch = leadUid === 'web-officer';
+  }
+
   return Boolean(uidMatch || staffMatch || nameMatch);
 }
 
@@ -532,6 +572,7 @@ function isFollowUpDueAlert(lead) {
 
 async function renderLeads() {
   const allLeads = await LocalDB.getAllLeads();
+  cachedLeadsList = allLeads;
   const countSpan = document.getElementById('leadsCount');
   const { leads: filtered, authorizedScopeLeads, scopeLabel } = getFilteredAuthorizedLeads(allLeads);
 
