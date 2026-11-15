@@ -647,6 +647,7 @@ function calculate() {
     }
 
     const depRes = calculateDepositProfit(amount, rate, tenure, isFilerCustomer, filerRate, nonFilerRate);
+
     document.getElementById('depGrossMo').textContent = `PKR ${formatPKR(depRes.monthlyProfit)} / mo`;
     document.getElementById('depTaxMo').textContent = `Tax (${depRes.taxRate}%): -PKR ${formatPKR(depRes.monthlyTax)}`;
     document.getElementById('depNetMo').textContent = `Net: PKR ${formatPKR(depRes.netMonthlyProfit)} / mo`;

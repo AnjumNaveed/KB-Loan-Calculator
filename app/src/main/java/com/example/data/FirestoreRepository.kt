@@ -211,7 +211,8 @@ class FirestoreRepository(val db: FirebaseFirestore) {
     profile: OfficerProfile,
     leads: List<CustomerLead>,
     userId: String,
-    userEmail: String
+    userEmail: String,
+    profileUpdatedAt: Long = 0L
   ) {
     try {
       if (userId.isNotBlank() && profile.isOnboarded) {
@@ -220,7 +221,8 @@ class FirestoreRepository(val db: FirebaseFirestore) {
           email = userEmail,
           officerName = profile.officerName,
           staffId = profile.staffId,
-          branchName = profile.branchName
+          branchName = profile.branchName,
+          localUpdatedAt = profileUpdatedAt
         )
       }
       val pendingLeads = leads.filter { it.syncStatus != "synced" }
@@ -735,7 +737,8 @@ class FirestoreRepository(val db: FirebaseFirestore) {
     email: String,
     officerName: String,
     staffId: String,
-    branchName: String
+    branchName: String,
+    localUpdatedAt: Long = 0L
   ) {
     val cleanUid = uid.trim()
     if (cleanUid.isBlank()) return
@@ -749,10 +752,10 @@ class FirestoreRepository(val db: FirebaseFirestore) {
     var syncedUser: RegisteredUser? = null
 
     try {
-      // First check if user already exists in /config/global or /users/{uid}
+      // Check both /config/global and /users/{uid}, selecting the freshest record by updatedAt
       var existingUser: RegisteredUser? = null
       try {
-        val globalDoc = db.collection("config").document("global").get().await()
+        val globalDoc = getDocumentFreshFirst(db.collection("config").document("global"))
         val rawMap = globalDoc.get("registeredUsersMap") as? Map<*, *>
         rawMap?.forEach { (k, v) ->
           val m = v as? Map<*, *> ?: return@forEach
@@ -761,34 +764,52 @@ class FirestoreRepository(val db: FirebaseFirestore) {
             (cleanEmail.isNotBlank() && parsed.email.equals(cleanEmail, ignoreCase = true)) ||
             (cleanStaff.isNotBlank() && parsed.staffId.equals(cleanStaff, ignoreCase = true))
           ) {
-            existingUser = parsed
+            if (existingUser == null || parsed.updatedAt >= existingUser!!.updatedAt) {
+              existingUser = parsed
+            }
           }
         }
       } catch (_: Exception) {}
 
-      if (existingUser == null) {
-        try {
-          val docSnap = db.collection("users").document(cleanUid).get().await()
-          if (docSnap.exists()) {
-            val b = docSnap.getString("branchName") ?: ""
-            existingUser = RegisteredUser(
-              uid = cleanUid,
-              email = docSnap.getString("email") ?: cleanEmail,
-              officerName = docSnap.getString("officerName") ?: cleanName,
-              staffId = docSnap.getString("staffId") ?: cleanStaff,
-              branchName = b,
-              allowedSupervisorBranch = docSnap.getString("allowedSupervisorBranch")?.ifBlank { b } ?: b,
-              canUseSupervisorFilter = docSnap.getBoolean("canUseSupervisorFilter") ?: true,
-              isBlocked = docSnap.getBoolean("isBlocked") ?: true,
-              role = docSnap.getString("role") ?: "Loan Officer",
-              updatedAt = System.currentTimeMillis()
-            )
+      try {
+        val docSnap = getDocumentFreshFirst(db.collection("users").document(cleanUid))
+        if (docSnap.exists()) {
+          val b = docSnap.getString("branchName") ?: ""
+          val userDocRecord = RegisteredUser(
+            uid = cleanUid,
+            email = docSnap.getString("email") ?: cleanEmail,
+            officerName = docSnap.getString("officerName") ?: cleanName,
+            staffId = docSnap.getString("staffId") ?: cleanStaff,
+            branchName = b,
+            allowedSupervisorBranch = docSnap.getString("allowedSupervisorBranch")?.ifBlank { b } ?: b,
+            canUseSupervisorFilter = docSnap.getBoolean("canUseSupervisorFilter") ?: true,
+            isBlocked = docSnap.getBoolean("isBlocked") ?: true,
+            role = docSnap.getString("role") ?: "Loan Officer",
+            updatedAt = docSnap.getLong("updatedAt") ?: 0L
+          )
+          if (existingUser == null || userDocRecord.updatedAt >= existingUser!!.updatedAt) {
+            existingUser = userDocRecord
           }
-        } catch (_: Exception) {}
+        }
+      } catch (_: Exception) {}
+
+      val prev = existingUser
+      if (prev != null && prev.updatedAt > localUpdatedAt && (prev.officerName.isNotBlank() || prev.staffId.isNotBlank() || prev.branchName.isNotBlank())) {
+        // Cloud record is strictly newer (e.g., edited on Web): do NOT clobber with stale local values!
+        // Only fill missing UID/email if needed without bumping updatedAt
+        if (prev.uid != cleanUid || (cleanEmail.isNotBlank() && prev.email.isBlank())) {
+          val patched = prev.copy(
+            uid = cleanUid,
+            email = prev.email.ifBlank { cleanEmail }
+          )
+          upsertUserInGlobalRegistry(patched)
+          db.collection("users").document(cleanUid).set(userToMap(patched), SetOptions.merge()).await()
+        }
+        return
       }
 
-      val finalUser = if (existingUser != null) {
-        val prev = existingUser!!
+      val effectiveTs = if (localUpdatedAt > 0L) localUpdatedAt else System.currentTimeMillis()
+      val finalUser = if (prev != null) {
         val effBranch = cleanBranch.ifBlank { prev.branchName }
         val effAllowed = prev.allowedSupervisorBranch.ifBlank { effBranch }
         prev.copy(
@@ -798,7 +819,7 @@ class FirestoreRepository(val db: FirebaseFirestore) {
           staffId = cleanStaff.ifBlank { prev.staffId },
           branchName = effBranch,
           allowedSupervisorBranch = effAllowed,
-          updatedAt = System.currentTimeMillis()
+          updatedAt = effectiveTs
         )
       } else {
         // Brand-new user: BLOCKED by default until Admin enables them
@@ -812,7 +833,7 @@ class FirestoreRepository(val db: FirebaseFirestore) {
           canUseSupervisorFilter = true,
           isBlocked = true,
           role = "Loan Officer",
-          updatedAt = System.currentTimeMillis()
+          updatedAt = effectiveTs
         )
       }
       syncedUser = finalUser

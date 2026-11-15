@@ -21,6 +21,14 @@ let activeLoadingCount = 0;
 let deferredInstallPrompt = null;
 let lastKnownGeoLocation = null;
 let onboardingShownThisSession = false;
+let isVerifyingProfile = false;
+let verifyProfileQueued = false;
+let lastCloudSyncTime = 0;
+let syncHeartbeatTimer = null;
+let loadingDismissTimer = null;
+let loadingFailSafeTimer = null;
+let isSyncingNow = false;
+let hasPulledSheetOnAuth = false;
 
 let globalConfig = {
   fedRate: 16.0,
@@ -240,37 +248,122 @@ function cleanRawActionPayload(raw) {
   return text.trim();
 }
 
-// 4. INDEXEDDB PERSISTENCE LAYER
+// 4. RESILIENT INDEXEDDB + LOCALSTORAGE PERSISTENCE LAYER
 class LocalDB {
+  static _dbPromise = null;
+  static _useFallback = false;
+  static _memStore = new Map();
+
+  static _lsGet(key, fallback = null) {
+    try {
+      const raw = window.localStorage.getItem('kbl_pwa_' + key);
+      if (raw !== null) return JSON.parse(raw);
+    } catch (e) {}
+    return this._memStore.has(key) ? this._memStore.get(key) : fallback;
+  }
+
+  static _lsSet(key, value) {
+    this._memStore.set(key, value);
+    try {
+      window.localStorage.setItem('kbl_pwa_' + key, JSON.stringify(value));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   static init() {
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open('KBCalculatorDB', 2);
-      request.onupgradeneeded = (e) => {
-        const d = e.target.result;
-        if (!d.objectStoreNames.contains('leads')) {
-          d.createObjectStore('leads', { keyPath: 'id' });
+    if (this._useFallback) return Promise.resolve(null);
+    if (this._dbPromise) return this._dbPromise;
+
+    this._dbPromise = new Promise((resolve) => {
+      if (typeof indexedDB === 'undefined') {
+        this._useFallback = true;
+        resolve(null);
+        return;
+      }
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          this._useFallback = true;
+          console.warn('IndexedDB init timed out — falling back to localStorage');
+          resolve(null);
         }
-        if (!d.objectStoreNames.contains('settings')) {
-          d.createObjectStore('settings', { keyPath: 'key' });
+      }, 2200);
+
+      try {
+        const request = indexedDB.open('KBCalculatorDB', 2);
+        request.onupgradeneeded = (e) => {
+          const d = e.target.result;
+          if (!d.objectStoreNames.contains('leads')) {
+            d.createObjectStore('leads', { keyPath: 'id' });
+          }
+          if (!d.objectStoreNames.contains('settings')) {
+            d.createObjectStore('settings', { keyPath: 'key' });
+          }
+        };
+        request.onsuccess = (e) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(e.target.result);
+        };
+        request.onerror = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          this._useFallback = true;
+          resolve(null);
+        };
+        request.onblocked = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          this._useFallback = true;
+          resolve(null);
+        };
+      } catch (err) {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          this._useFallback = true;
+          resolve(null);
         }
-      };
-      request.onsuccess = (e) => resolve(e.target.result);
-      request.onerror = (e) => reject(e);
+      }
     });
+
+    return this._dbPromise;
   }
 
   static async getAllLeads() {
     const d = await this.init();
+    if (!d) {
+      const res = this._lsGet('leads_list', []);
+      cachedLeadsList = Array.isArray(res) ? res : [];
+      return cachedLeadsList;
+    }
     return new Promise((resolve) => {
-      const tx = d.transaction('leads', 'readonly');
-      const store = tx.objectStore('leads');
-      const req = store.getAll();
-      req.onsuccess = () => {
-        const res = req.result || [];
-        cachedLeadsList = res;
-        resolve(res);
-      };
-      req.onerror = () => resolve([]);
+      try {
+        const tx = d.transaction('leads', 'readonly');
+        const store = tx.objectStore('leads');
+        const req = store.getAll();
+        req.onsuccess = () => {
+          const res = req.result || [];
+          cachedLeadsList = res;
+          this._lsSet('leads_list', res);
+          resolve(res);
+        };
+        req.onerror = () => {
+          const fbRes = this._lsGet('leads_list', []);
+          cachedLeadsList = Array.isArray(fbRes) ? fbRes : [];
+          resolve(cachedLeadsList);
+        };
+      } catch (e) {
+        const fbRes = this._lsGet('leads_list', []);
+        cachedLeadsList = Array.isArray(fbRes) ? fbRes : [];
+        resolve(cachedLeadsList);
+      }
     });
   }
 
@@ -278,49 +371,72 @@ class LocalDB {
     const idx = cachedLeadsList.findIndex(x => x.id === lead.id);
     if (idx >= 0) cachedLeadsList[idx] = lead;
     else cachedLeadsList.push(lead);
+    this._lsSet('leads_list', cachedLeadsList);
 
     const d = await this.init();
+    if (!d) return true;
     return new Promise((resolve) => {
-      const tx = d.transaction('leads', 'readwrite');
-      const store = tx.objectStore('leads');
-      store.put(lead);
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = () => resolve(false);
+      try {
+        const tx = d.transaction('leads', 'readwrite');
+        const store = tx.objectStore('leads');
+        store.put(lead);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(true);
+      } catch (e) {
+        resolve(true);
+      }
     });
   }
 
   static async deleteLead(leadId) {
     cachedLeadsList = cachedLeadsList.filter(x => x.id !== leadId);
+    this._lsSet('leads_list', cachedLeadsList);
 
     const d = await this.init();
+    if (!d) return true;
     return new Promise((resolve) => {
-      const tx = d.transaction('leads', 'readwrite');
-      const store = tx.objectStore('leads');
-      store.delete(leadId);
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = () => resolve(false);
+      try {
+        const tx = d.transaction('leads', 'readwrite');
+        const store = tx.objectStore('leads');
+        store.delete(leadId);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(true);
+      } catch (e) {
+        resolve(true);
+      }
     });
   }
 
   static async getSetting(key, fallback = '') {
     const d = await this.init();
+    if (!d) return this._lsGet('setting_' + key, fallback);
     return new Promise((resolve) => {
-      const tx = d.transaction('settings', 'readonly');
-      const store = tx.objectStore('settings');
-      const req = store.get(key);
-      req.onsuccess = () => resolve(req.result ? req.result.value : fallback);
-      req.onerror = () => resolve(fallback);
+      try {
+        const tx = d.transaction('settings', 'readonly');
+        const store = tx.objectStore('settings');
+        const req = store.get(key);
+        req.onsuccess = () => resolve(req.result ? req.result.value : this._lsGet('setting_' + key, fallback));
+        req.onerror = () => resolve(this._lsGet('setting_' + key, fallback));
+      } catch (e) {
+        resolve(this._lsGet('setting_' + key, fallback));
+      }
     });
   }
 
   static async setSetting(key, value) {
+    this._lsSet('setting_' + key, value);
     const d = await this.init();
+    if (!d) return true;
     return new Promise((resolve) => {
-      const tx = d.transaction('settings', 'readwrite');
-      const store = tx.objectStore('settings');
-      store.put({ key, value });
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = () => resolve(false);
+      try {
+        const tx = d.transaction('settings', 'readwrite');
+        const store = tx.objectStore('settings');
+        store.put({ key, value });
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(true);
+      } catch (e) {
+        resolve(true);
+      }
     });
   }
 }
@@ -334,7 +450,8 @@ let officerProfile = {
   officerName: '',
   staffId: '',
   branchName: '',
-  webhookUrl: ''
+  webhookUrl: '',
+  profileUpdatedAt: 0
 };
 
 window.addEventListener('beforeinstallprompt', (e) => {
@@ -388,14 +505,38 @@ async function triggerPwaInstall() {
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
-  const savedTheme = await LocalDB.getSetting('themeMode', 'light');
-  applyThemeMode(savedTheme);
+  window.__kblAppBooted = true;
+  try {
+    const savedTheme = await LocalDB.getSetting('themeMode', 'light');
+    applyThemeMode(savedTheme);
+  } catch (e) {
+    applyThemeMode('light');
+  }
   updatePwaBannerState();
 
-  await loadSettings();
+  try {
+    const cachedProdsRaw = await LocalDB.getSetting('cachedProductsJson', '');
+    if (cachedProdsRaw) {
+      const parsedProds = JSON.parse(cachedProdsRaw);
+      if (Array.isArray(parsedProds) && parsedProds.length > 0) {
+        BANK_PRODUCTS = parsedProds;
+      }
+    }
+  } catch (e) {}
+
+  try {
+    await loadSettings();
+  } catch (e) {
+    console.warn('Settings load notice:', e);
+  }
   populateProducts();
   calculate();
-  await renderLeads();
+
+  try {
+    await renderLeads();
+  } catch (e) {
+    console.warn('Initial leads render notice:', e);
+  }
   updateOnlineStatus();
   updateSettingsStats();
   prewarmGeoLocation();
@@ -404,16 +545,17 @@ window.addEventListener('DOMContentLoaded', async () => {
     initFirebaseAuthAndFirestore();
   }
   initGoogleIdentityServices();
+  startAutoSyncHeartbeat();
 
   window.addEventListener('online', () => {
     updateOnlineStatus();
-    manualSync(true);
+    flushPendingLeadsToCloudAndSheets(true);
   });
   window.addEventListener('offline', updateOnlineStatus);
 
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').then(() => {
-      console.log('PWA Service Worker registered');
+    navigator.serviceWorker.register('./sw.js').then((reg) => {
+      try { reg.update(); } catch (e) {}
     }).catch(err => console.warn('SW registration notice:', err));
   }
 });
@@ -421,9 +563,21 @@ window.addEventListener('DOMContentLoaded', async () => {
 window.addEventListener('firebase-bridge-ready', () => {
   initFirebaseAuthAndFirestore();
 });
+window.addEventListener('firebase-bridge-error', () => {
+  showToast('⚠️ Cloud connection limited on this network — local mode active.');
+});
 window.addEventListener('gis-script-ready', () => {
   initGoogleIdentityServices();
 });
+
+function startAutoSyncHeartbeat() {
+  if (syncHeartbeatTimer) clearInterval(syncHeartbeatTimer);
+  syncHeartbeatTimer = setInterval(() => {
+    if (navigator.onLine && fb && currentUser && !isSyncingNow) {
+      flushPendingLeadsToCloudAndSheets(true);
+    }
+  }, 25000);
+}
 
 // 6. FIREBASE AUTH & ACCESS CONTROL GATE (ALLOW / DENY)
 function initFirebaseAuthAndFirestore() {
@@ -451,6 +605,7 @@ function initFirebaseAuthAndFirestore() {
     const settingsRole = document.getElementById('settingsUserRole');
 
     if (user) {
+      hasPulledSheetOnAuth = false;
       if (headerWrap) headerWrap.style.display = 'none';
       if (authBtn) authBtn.style.display = 'none';
       if (gisSettingsSlot) gisSettingsSlot.style.display = 'none';
@@ -464,12 +619,24 @@ function initFirebaseAuthAndFirestore() {
       }
       closeModal('googleSignInModal');
 
+      // Attach all real-time listeners concurrently without blocking on profile verification
       startFirestoreGlobalConfigListener(user);
       startFirestoreUserListener(user);
       startFirestoreUsersCollectionListener(user);
-      await verifyUserAccessAndSyncProfile(user);
       startFirestoreProductsListener();
       startFirestoreLeadsListener();
+
+      await verifyUserAccessAndSyncProfile(user, true);
+
+      // Push any offline-created leads & perform 2-way Google Sheets sync after sign-in
+      if (navigator.onLine) {
+        flushPendingLeadsToCloudAndSheets(true).then(() => {
+          if (!hasPulledSheetOnAuth && getEffectiveWebhookUrl()) {
+            hasPulledSheetOnAuth = true;
+            return pullLeadsFromGoogleSheet(true);
+          }
+        }).catch(e => console.warn('Initial post-auth sync notice:', e));
+      }
     } else {
       if (headerWrap) headerWrap.style.display = 'inline-flex';
       if (gisSettingsSlot) gisSettingsSlot.style.display = 'flex';
@@ -521,6 +688,10 @@ function startFirestoreGlobalConfigListener(user) {
       if (d.googleSheetsWebhookUrl && officerProfile.webhookUrl !== d.googleSheetsWebhookUrl) {
         officerProfile.webhookUrl = d.googleSheetsWebhookUrl;
         await LocalDB.setSetting('webhookUrl', officerProfile.webhookUrl);
+        if (currentUser && !hasPulledSheetOnAuth && navigator.onLine) {
+          hasPulledSheetOnAuth = true;
+          pullLeadsFromGoogleSheet(true).catch(e => console.warn('Auto sheet pull notice:', e));
+        }
       }
 
       updateAppUpdateBanner();
@@ -531,7 +702,7 @@ function startFirestoreGlobalConfigListener(user) {
         populateAdminControls();
       }
       if (user) {
-        await verifyUserAccessAndSyncProfile(user);
+        await verifyUserAccessAndSyncProfile(user, false);
       }
     }
   }, (err) => {
@@ -544,7 +715,7 @@ function startFirestoreUserListener(user) {
   if (unsubscribeUserDoc) unsubscribeUserDoc();
 
   unsubscribeUserDoc = fb.onDocSnapshot('users', user.uid, async () => {
-    await verifyUserAccessAndSyncProfile(user);
+    await verifyUserAccessAndSyncProfile(user, false);
   }, (err) => {
     console.warn('User doc listener notice:', err);
   });
@@ -568,7 +739,7 @@ function startFirestoreUsersCollectionListener(user) {
       renderAdminUsersList();
     }
     if (user) {
-      await verifyUserAccessAndSyncProfile(user);
+      await verifyUserAccessAndSyncProfile(user, false);
     } else {
       renderLeads();
     }
@@ -577,8 +748,13 @@ function startFirestoreUsersCollectionListener(user) {
   });
 }
 
-async function verifyUserAccessAndSyncProfile(user) {
+async function verifyUserAccessAndSyncProfile(user, fetchFresh = false) {
   if (!fb || !user) return;
+  if (isVerifyingProfile) {
+    verifyProfileQueued = true;
+    return;
+  }
+  isVerifyingProfile = true;
 
   try {
     const isPrimaryAdmin = Boolean(
@@ -587,19 +763,34 @@ async function verifyUserAccessAndSyncProfile(user) {
     const userEmailLower = (user.email || '').trim().toLowerCase();
     const localStaffLower = (officerProfile.staffId || '').trim().toLowerCase();
 
-    const snap = await fb.getDoc('users', user.uid);
-    const directUserDoc = snap.exists() ? snap.data() : null;
+    let directUserDoc = null;
+    if (fetchFresh || !(globalConfig.liveUsersCollectionMap && globalConfig.liveUsersCollectionMap[user.uid])) {
+      try {
+        const snap = await Promise.race([
+          fb.getDoc('users', user.uid),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 6500))
+        ]);
+        directUserDoc = snap.exists() ? snap.data() : null;
+      } catch (e) {}
+    } else {
+      directUserDoc = globalConfig.liveUsersCollectionMap[user.uid] || null;
+    }
 
     let regMap = globalConfig.registeredUsersMap || {};
-    try {
-      const globalSnap = await fb.getDoc('config', 'global');
-      if (globalSnap.exists()) {
-        const gData = globalSnap.data();
-        regMap = gData.registeredUsersMap || {};
-        globalConfig.registeredUsersMap = regMap;
+    if (fetchFresh || Object.keys(regMap).length === 0) {
+      try {
+        const globalSnap = await Promise.race([
+          fb.getDoc('config', 'global'),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 6500))
+        ]);
+        if (globalSnap.exists()) {
+          const gData = globalSnap.data();
+          regMap = gData.registeredUsersMap || {};
+          globalConfig.registeredUsersMap = regMap;
+        }
+      } catch (e) {
+        console.warn('Global registry read notice:', e);
       }
-    } catch (e) {
-      console.warn('Global registry read notice:', e);
     }
 
     const candidates = [];
@@ -629,24 +820,23 @@ async function verifyUserAccessAndSyncProfile(user) {
     let effectiveRecord = null;
     if (candidates.length > 0) {
       effectiveRecord = { uid: user.uid };
-      // Merge freshest non-empty values across matching Android/Web user docs
+      // Merge values oldest -> newest so freshest timestamp wins for every non-empty field
       candidates.slice().reverse().forEach(rec => {
         Object.entries(rec).forEach(([k, v]) => {
           if (v !== undefined && v !== null && v !== '') {
-            if (k === 'branchName' && String(v).trim().toLowerCase() === 'main branch' && effectiveRecord.branchName) {
-              return;
-            }
             effectiveRecord[k] = v;
           }
         });
       });
-      // Ensure explicit boolean flags from freshest candidate win
       const freshest = candidates[0];
       if (freshest.isBlocked !== undefined) effectiveRecord.isBlocked = freshest.isBlocked;
       if (freshest.canUseSupervisorFilter !== undefined) effectiveRecord.canUseSupervisorFilter = freshest.canUseSupervisorFilter;
       if (freshest.role) effectiveRecord.role = freshest.role;
-      if (freshest.allowedSupervisorBranch) effectiveRecord.allowedSupervisorBranch = freshest.allowedSupervisorBranch;
+      if (freshest.allowedSupervisorBranch !== undefined) effectiveRecord.allowedSupervisorBranch = freshest.allowedSupervisorBranch;
+      if (freshest.updatedAt) effectiveRecord.updatedAt = Number(freshest.updatedAt) || 0;
     }
+
+    const localProfileTs = Number(officerProfile.profileUpdatedAt || await LocalDB.getSetting('profileUpdatedAt', 0)) || 0;
 
     if (effectiveRecord) {
       currentUserProfile = { uid: user.uid, ...effectiveRecord };
@@ -658,17 +848,44 @@ async function verifyUserAccessAndSyncProfile(user) {
         hideAccessDeniedScreen();
       }
 
-      if (effectiveRecord.officerName && effectiveRecord.officerName.trim()) {
-        officerProfile.officerName = effectiveRecord.officerName.trim();
-        await LocalDB.setSetting('officerName', officerProfile.officerName);
-      }
-      if (effectiveRecord.staffId && effectiveRecord.staffId.trim()) {
-        officerProfile.staffId = effectiveRecord.staffId.trim();
-        await LocalDB.setSetting('staffId', officerProfile.staffId);
-      }
-      if (effectiveRecord.branchName && effectiveRecord.branchName.trim()) {
-        officerProfile.branchName = effectiveRecord.branchName.trim();
-        await LocalDB.setSetting('branchName', officerProfile.branchName);
+      const remoteTs = Number(effectiveRecord.updatedAt) || 0;
+      const localNameBlank = !officerProfile.officerName || officerProfile.officerName.trim().toLowerCase() === 'loan officer';
+      const localStaffBlank = !officerProfile.staffId || /^RO-[A-F0-9]{4}$/i.test(officerProfile.staffId.trim());
+      const localBranchBlank = !officerProfile.branchName || !officerProfile.branchName.trim();
+      const cloudWins = remoteTs >= localProfileTs || localNameBlank || localStaffBlank || localBranchBlank;
+
+      if (cloudWins) {
+        if (effectiveRecord.officerName && effectiveRecord.officerName.trim()) {
+          officerProfile.officerName = effectiveRecord.officerName.trim();
+          await LocalDB.setSetting('officerName', officerProfile.officerName);
+        }
+        if (effectiveRecord.staffId && effectiveRecord.staffId.trim()) {
+          officerProfile.staffId = effectiveRecord.staffId.trim();
+          await LocalDB.setSetting('staffId', officerProfile.staffId);
+        }
+        if (effectiveRecord.branchName && effectiveRecord.branchName.trim()) {
+          officerProfile.branchName = effectiveRecord.branchName.trim();
+          await LocalDB.setSetting('branchName', officerProfile.branchName);
+        }
+        if (remoteTs > localProfileTs) {
+          officerProfile.profileUpdatedAt = remoteTs;
+          await LocalDB.setSetting('profileUpdatedAt', remoteTs);
+        }
+      } else if (localProfileTs > remoteTs && (!localNameBlank || !localStaffBlank || !localBranchBlank)) {
+        // Local Web offline edits are strictly newer than Cloud — push them upward!
+        const pushRec = {
+          ...effectiveRecord,
+          uid: user.uid,
+          email: user.email || effectiveRecord.email || '',
+          officerName: officerProfile.officerName,
+          staffId: officerProfile.staffId,
+          branchName: officerProfile.branchName,
+          updatedAt: localProfileTs
+        };
+        try {
+          await fb.setDoc('users', user.uid, pushRec, true);
+          await fb.setDoc('config', 'global', { registeredUsersMap: { [user.uid]: pushRec } }, true);
+        } catch (e) {}
       }
 
       const roleEl = document.getElementById('settingsUserRole');
@@ -680,6 +897,7 @@ async function verifyUserAccessAndSyncProfile(user) {
       const defaultRole = isPrimaryAdmin ? 'Admin' : 'Loan Officer';
       const defaultBlocked = !isPrimaryAdmin;
       const initialBranch = officerProfile.branchName || '';
+      const nowTs = localProfileTs || Date.now();
 
       const newUser = {
         uid: user.uid,
@@ -691,15 +909,17 @@ async function verifyUserAccessAndSyncProfile(user) {
         canUseSupervisorFilter: isPrimaryAdmin,
         isBlocked: defaultBlocked,
         role: defaultRole,
-        updatedAt: Date.now()
+        updatedAt: nowTs
       };
 
       officerProfile.officerName = newUser.officerName;
       officerProfile.staffId = newUser.staffId;
       officerProfile.branchName = newUser.branchName;
+      officerProfile.profileUpdatedAt = nowTs;
       await LocalDB.setSetting('officerName', officerProfile.officerName);
       await LocalDB.setSetting('staffId', officerProfile.staffId);
       await LocalDB.setSetting('branchName', officerProfile.branchName);
+      await LocalDB.setSetting('profileUpdatedAt', nowTs);
 
       await fb.setDoc('users', user.uid, newUser, true);
       try {
@@ -740,6 +960,12 @@ async function verifyUserAccessAndSyncProfile(user) {
     updateSettingsStats();
   } catch (err) {
     console.warn('Error verifying user access in Firestore:', err);
+  } finally {
+    isVerifyingProfile = false;
+    if (verifyProfileQueued) {
+      verifyProfileQueued = false;
+      setTimeout(() => verifyUserAccessAndSyncProfile(user, false), 150);
+    }
   }
 }
 
@@ -975,7 +1201,7 @@ function startFirestoreProductsListener() {
   if (!fb) return;
   if (unsubscribeProducts) unsubscribeProducts();
 
-  unsubscribeProducts = fb.onCollectionSnapshot('products', (snapshot) => {
+  unsubscribeProducts = fb.onCollectionSnapshot('products', async (snapshot) => {
     if (!snapshot.empty) {
       const fetched = [];
       snapshot.forEach(docSnap => {
@@ -1040,6 +1266,7 @@ function startFirestoreProductsListener() {
 
       if (fetched.length > 0) {
         BANK_PRODUCTS = fetched;
+        await LocalDB.setSetting('cachedProductsJson', JSON.stringify(fetched));
         const previousId = currentProduct ? currentProduct.id : null;
         populateProducts(previousId);
         calculate();
@@ -1050,6 +1277,8 @@ function startFirestoreProductsListener() {
     }
   }, (err) => {
     console.warn('Products sync stream notice:', err);
+    const badge = document.getElementById('firestoreProductSyncBadge');
+    if (badge) badge.textContent = '⚠️ Sync Retrying...';
   });
 }
 
@@ -1059,67 +1288,81 @@ function startFirestoreLeadsListener() {
   if (unsubscribeLeads) unsubscribeLeads();
 
   unsubscribeLeads = fb.onCollectionSnapshot('leads', async (snapshot) => {
-    const localLeads = await LocalDB.getAllLeads();
-    const localMap = new Map(localLeads.map(l => [l.id, l]));
-    const remoteIds = new Set();
+    try {
+      const localLeads = await LocalDB.getAllLeads();
+      const localMap = new Map(localLeads.map(l => [l.id, l]));
+      const remoteIds = new Set();
 
-    snapshot.forEach(docSnap => {
-      const d = docSnap.data();
-      const leadId = d.id || docSnap.id;
-      remoteIds.add(leadId);
-      const existing = localMap.get(leadId);
+      for (const docSnap of snapshot.docs) {
+        const d = docSnap.data();
+        const leadId = d.id || docSnap.id;
+        remoteIds.add(leadId);
+        const existing = localMap.get(leadId);
 
-      const remoteLead = {
-        id: leadId,
-        customerName: d.customerName || 'Customer',
-        mobile: d.mobile || '',
-        dob: d.dob || '',
-        age: Number(d.age) || 0,
-        monthlyIncome: Number(d.monthlyIncome) || 0,
-        dbrAllowed: Number(d.dbrAllowed) || 50,
-        category: d.category || 'asset',
-        productId: d.productId || '',
-        productName: d.productName || 'Bank Facility',
-        loanAmount: Number(d.loanAmount) || 0,
-        tenureMonths: Number(d.tenureMonths) || 12,
-        monthlyEmi: Number(d.monthlyEmi) || 0,
-        totalProfit: Number(d.totalProfit) || 0,
-        processingFee: Number(d.processingFee) || 0,
-        isFiler: d.isFiler !== false,
-        taxRate: Number(d.taxRate) || 0,
-        taxDeducted: Number(d.taxDeducted) || 0,
-        netProfit: Number(d.netProfit) || 0,
-        status: d.status || 'New',
-        notes: cleanRawActionPayload(d.notes || ''),
-        followUpDate: d.followUpDate || '',
-        officerName: d.officerName || '',
-        officerId: d.officerId || '',
-        branchName: d.branchName || '',
-        userId: d.userId || '',
-        latitude: d.latitude ?? null,
-        longitude: d.longitude ?? null,
-        locationAddress: d.locationAddress || '',
-        locationCapturedAt: Number(d.locationCapturedAt) || 0,
-        createdAt: Number(d.createdAt) || Date.now(),
-        syncStatus: 'synced',
-        approachCount: Number(d.approachCount) || (Array.isArray(d.activities) ? d.activities.length : 1),
-        activities: Array.isArray(d.activities) ? d.activities : (existing ? existing.activities : [])
-      };
+        const remoteUpdatedMs = Number(d.updatedAtMs) || Number(d.createdAt) || 0;
+        const localUpdatedMs = existing ? (Number(existing.updatedAtMs) || Number(existing.createdAt) || 0) : 0;
+        if (existing && existing.syncStatus === 'pending_sync' && localUpdatedMs > remoteUpdatedMs) {
+          continue;
+        }
 
-      LocalDB.saveLead(remoteLead);
-      localMap.set(leadId, remoteLead);
-    });
+        const remoteLead = {
+          id: leadId,
+          customerName: d.customerName || 'Customer',
+          mobile: d.mobile || '',
+          dob: d.dob || '',
+          age: Number(d.age) || 0,
+          monthlyIncome: Number(d.monthlyIncome) || 0,
+          dbrAllowed: Number(d.dbrAllowed) || 50,
+          category: d.category || 'asset',
+          productId: d.productId || '',
+          productName: d.productName || 'Bank Facility',
+          loanAmount: Number(d.loanAmount) || 0,
+          tenureMonths: Number(d.tenureMonths) || 12,
+          monthlyEmi: Number(d.monthlyEmi) || 0,
+          totalProfit: Number(d.totalProfit) || 0,
+          processingFee: Number(d.processingFee) || 0,
+          isFiler: d.isFiler !== false,
+          taxRate: Number(d.taxRate) || 0,
+          taxDeducted: Number(d.taxDeducted) || 0,
+          netProfit: Number(d.netProfit) || 0,
+          status: d.status || 'New',
+          notes: cleanRawActionPayload(d.notes || ''),
+          followUpDate: d.followUpDate || '',
+          officerName: d.officerName || '',
+          officerId: d.officerId || '',
+          branchName: d.branchName || '',
+          userId: d.userId || '',
+          latitude: d.latitude ?? null,
+          longitude: d.longitude ?? null,
+          locationAddress: d.locationAddress || '',
+          locationCapturedAt: Number(d.locationCapturedAt) || 0,
+          createdAt: Number(d.createdAt) || Date.now(),
+          updatedAtMs: remoteUpdatedMs || Date.now(),
+          syncStatus: 'synced',
+          sheetsSynced: d.sheetsSynced === true || (existing ? Boolean(existing.sheetsSynced) : false),
+          approachCount: Number(d.approachCount) || (Array.isArray(d.activities) ? d.activities.length : 1),
+          notesUpdateCount: Number(d.notesUpdateCount) || (Array.isArray(d.activities) ? d.activities.filter(a => a.actionType === 'note_update').length : 0),
+          activities: Array.isArray(d.activities) ? d.activities : (existing ? existing.activities : [])
+        };
 
-    for (const local of localLeads) {
-      if (local.syncStatus === 'synced' && !remoteIds.has(local.id)) {
-        await LocalDB.deleteLead(local.id);
+        await LocalDB.saveLead(remoteLead);
+        localMap.set(leadId, remoteLead);
       }
-    }
 
-    await renderLeads();
-    updateSettingsStats();
-    if (adminUnlocked) {
-      await renderAdminLeadsDbList();
+      for (const local of localLeads) {
+        if (local.syncStatus === 'synced' && !remoteIds.has(local.id)) {
+          await LocalDB.deleteLead(local.id);
+        }
+      }
+
+      lastCloudSyncTime = Date.now();
+      await renderLeads();
+      await updateSettingsStats();
+      if (adminUnlocked) {
+        await renderAdminLeadsDbList();
+      }
+    } catch (e) {
+      console.warn('Leads snapshot processing error:', e);
     }
   }, (err) => {
     console.warn('Leads sync stream notice:', err);
@@ -1463,7 +1706,7 @@ async function saveLeadFromCalculator(silent = false) {
       dob: dob || '',
       age: ageInfo.years || 0,
       monthlyIncome,
-      dbrAllowed,
+      dbrAllowed: allowedDbr || 50,
       category: currentProduct.category,
       productId: currentProduct.id,
       productName: currentProduct.name,
@@ -1488,32 +1731,58 @@ async function saveLeadFromCalculator(silent = false) {
       locationAddress: loc ? loc.locationAddress : '',
       locationCapturedAt: loc ? loc.locationCapturedAt : 0,
       createdAt: now,
+      updatedAtMs: now,
       syncStatus: 'pending_sync',
+      sheetsSynced: false,
       approachCount: 1,
       notesUpdateCount: cleanNote ? 1 : 0,
       activities: initialActivities
     };
   }
 
+  lead.updatedAtMs = now;
+  lead.sheetsSynced = false;
   await LocalDB.saveLead(lead);
 
-  if (fb) {
+  let firestoreSaved = false;
+  let firestoreErrMsg = '';
+  if (fb && currentUser && navigator.onLine) {
     try {
-      await fb.setDoc('leads', lead.id, {
-        ...lead,
-        syncStatus: 'synced',
-        updatedAtMs: Date.now(),
-        updatedAt: fb.serverTimestamp()
-      }, true);
+      await Promise.race([
+        fb.setDoc('leads', lead.id, {
+          ...lead,
+          syncStatus: 'synced',
+          updatedAtMs: now,
+          updatedAt: fb.serverTimestamp()
+        }, true),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('Cloud timeout')), 8000))
+      ]);
       lead.syncStatus = 'synced';
+      firestoreSaved = true;
+      lastCloudSyncTime = Date.now();
       await LocalDB.saveLead(lead);
     } catch (e) {
+      firestoreErrMsg = e && e.message ? e.message : 'Cloud unreachable';
       console.warn('Firestore write warning:', e);
     }
+  } else {
+    firestoreErrMsg = !currentUser ? 'Not signed in' : (!navigator.onLine ? 'Offline' : 'Cloud initializing');
+  }
+
+  let sheetSaved = false;
+  const webhookUrl = getEffectiveWebhookUrl();
+  if (navigator.onLine && webhookUrl) {
+    sheetSaved = await syncLeadToSheet(lead, true);
   }
 
   if (!silent) {
-    showToast(`✅ Lead for ${custName} saved & synced!`);
+    if (firestoreSaved && (!webhookUrl || sheetSaved)) {
+      showToast(`✅ Lead for ${custName} saved & synced to Cloud${sheetSaved ? ' + Sheets' : ''}!`);
+    } else if (firestoreSaved && webhookUrl && !sheetSaved) {
+      showToast(`✅ Saved to Cloud, ⚠️ Google Sheet push pending (check Webhook URL).`);
+    } else {
+      showToast(`💾 Saved locally (${firestoreErrMsg || 'Pending Sync'}). Tap Sync when online.`);
+    }
     document.getElementById('customerName').value = '';
     document.getElementById('customerMobile').value = '';
     document.getElementById('customerDob').value = '';
@@ -1522,11 +1791,7 @@ async function saveLeadFromCalculator(silent = false) {
   }
 
   await renderLeads();
-  updateSettingsStats();
-
-  if (navigator.onLine && (officerProfile.webhookUrl || globalConfig.googleSheetsWebhookUrl)) {
-    syncLeadToSheet(lead);
-  }
+  await updateSettingsStats();
   return lead;
   };
 
@@ -1674,7 +1939,9 @@ async function logApproach(leadId, type, title, detail) {
 
   const now = Date.now();
   lead.approachCount = (lead.approachCount || 1) + 1;
+  lead.updatedAtMs = now;
   lead.syncStatus = 'pending_sync';
+  lead.sheetsSynced = false;
   if (!lead.activities) lead.activities = [];
 
   lead.activities.push({
@@ -1689,12 +1956,12 @@ async function logApproach(leadId, type, title, detail) {
 
   await LocalDB.saveLead(lead);
 
-  if (fb) {
+  if (fb && currentUser && navigator.onLine) {
     try {
       await fb.setDoc('leads', lead.id, {
         ...lead,
         syncStatus: 'synced',
-        updatedAtMs: Date.now(),
+        updatedAtMs: now,
         updatedAt: fb.serverTimestamp()
       }, true);
       lead.syncStatus = 'synced';
@@ -1704,8 +1971,9 @@ async function logApproach(leadId, type, title, detail) {
     }
   }
 
-  renderLeads();
-  if (navigator.onLine && officerProfile.webhookUrl) syncLeadToSheet(lead);
+  await renderLeads();
+  await updateSettingsStats();
+  if (navigator.onLine && getEffectiveWebhookUrl()) syncLeadToSheet(lead, true);
 }
 
 // 12. LEAD STATUS, NOTE & FOLLOW-UP ACTIONS
@@ -1720,7 +1988,9 @@ async function updateLeadStatus(leadId, newStatus) {
   await withLoading(`Updating status to ${newStatus}...`, async () => {
     const now = Date.now();
     lead.status = newStatus;
+    lead.updatedAtMs = now;
     lead.syncStatus = 'pending_sync';
+    lead.sheetsSynced = false;
     if (!lead.activities) lead.activities = [];
 
     lead.activities.push({
@@ -1735,16 +2005,18 @@ async function updateLeadStatus(leadId, newStatus) {
 
     await LocalDB.saveLead(lead);
 
-    if (fb) {
+    let cloudOk = false;
+    if (fb && currentUser && navigator.onLine) {
       try {
         await fb.setDoc('leads', lead.id, {
           status: newStatus,
           activities: lead.activities,
           syncStatus: 'synced',
-          updatedAtMs: Date.now(),
+          updatedAtMs: now,
           updatedAt: fb.serverTimestamp()
         }, true);
         lead.syncStatus = 'synced';
+        cloudOk = true;
         await LocalDB.saveLead(lead);
       } catch (e) {
         console.warn('Firestore status sync notice:', e);
@@ -1752,8 +2024,9 @@ async function updateLeadStatus(leadId, newStatus) {
     }
 
     await renderLeads();
-    showToast(`✅ Status updated to ${newStatus}`);
-    if (navigator.onLine && (officerProfile.webhookUrl || globalConfig.googleSheetsWebhookUrl)) syncLeadToSheet(lead);
+    await updateSettingsStats();
+    showToast(cloudOk ? `✅ Status updated to ${newStatus}` : `💾 Status updated locally (Pending Cloud Sync)`);
+    if (navigator.onLine && getEffectiveWebhookUrl()) syncLeadToSheet(lead, true);
   });
 }
 
@@ -1815,7 +2088,9 @@ async function confirmSaveNote() {
     const now = Date.now();
     lead.notes = cleanNote;
     lead.notesUpdateCount = (lead.notesUpdateCount || 0) + 1;
+    lead.updatedAtMs = now;
     lead.syncStatus = 'pending_sync';
+    lead.sheetsSynced = false;
     if (!lead.activities) lead.activities = [];
 
     lead.activities.push({
@@ -1830,15 +2105,17 @@ async function confirmSaveNote() {
 
     await LocalDB.saveLead(lead);
 
-    if (fb) {
+    let cloudOk = false;
+    if (fb && currentUser && navigator.onLine) {
       try {
         await fb.setDoc('leads', lead.id, {
           ...lead,
           syncStatus: 'synced',
-          updatedAtMs: Date.now(),
+          updatedAtMs: now,
           updatedAt: fb.serverTimestamp()
         }, true);
         lead.syncStatus = 'synced';
+        cloudOk = true;
         await LocalDB.saveLead(lead);
       } catch (e) {
         console.warn('Firestore note sync notice:', e);
@@ -1847,8 +2124,9 @@ async function confirmSaveNote() {
 
     closeModal('editNoteModal');
     await renderLeads();
-    showToast('✅ Note updated & synced!');
-    if (navigator.onLine && (officerProfile.webhookUrl || globalConfig.googleSheetsWebhookUrl)) syncLeadToSheet(lead);
+    await updateSettingsStats();
+    showToast(cloudOk ? '✅ Note updated & synced!' : '💾 Note saved locally (Pending Cloud Sync)');
+    if (navigator.onLine && getEffectiveWebhookUrl()) syncLeadToSheet(lead, true);
   });
 }
 
@@ -1877,7 +2155,9 @@ async function confirmScheduleFollowUp() {
     const now = Date.now();
     lead.followUpDate = dt.replace('T', ' ');
     lead.status = 'Follow-Up';
+    lead.updatedAtMs = now;
     lead.syncStatus = 'pending_sync';
+    lead.sheetsSynced = false;
     if (!lead.activities) lead.activities = [];
 
     lead.activities.push({
@@ -1892,15 +2172,17 @@ async function confirmScheduleFollowUp() {
 
     await LocalDB.saveLead(lead);
 
-    if (fb) {
+    let cloudOk = false;
+    if (fb && currentUser && navigator.onLine) {
       try {
         await fb.setDoc('leads', lead.id, {
           ...lead,
           syncStatus: 'synced',
-          updatedAtMs: Date.now(),
+          updatedAtMs: now,
           updatedAt: fb.serverTimestamp()
         }, true);
         lead.syncStatus = 'synced';
+        cloudOk = true;
         await LocalDB.saveLead(lead);
       } catch (e) {
         console.warn('Firestore follow-up sync notice:', e);
@@ -1909,8 +2191,9 @@ async function confirmScheduleFollowUp() {
 
     closeModal('followUpModal');
     await renderLeads();
-    showToast('📅 Follow-Up scheduled!');
-    if (navigator.onLine && (officerProfile.webhookUrl || globalConfig.googleSheetsWebhookUrl)) syncLeadToSheet(lead);
+    await updateSettingsStats();
+    showToast(cloudOk ? '📅 Follow-Up scheduled & synced!' : '📅 Scheduled locally (Pending Cloud Sync)');
+    if (navigator.onLine && getEffectiveWebhookUrl()) syncLeadToSheet(lead, true);
   });
 }
 
@@ -1921,16 +2204,19 @@ async function confirmClearFollowUp() {
   if (!lead) return;
 
   await withLoading('Clearing Follow-Up...', async () => {
+    const now = Date.now();
     lead.followUpDate = '';
+    lead.updatedAtMs = now;
     lead.syncStatus = 'pending_sync';
+    lead.sheetsSynced = false;
     await LocalDB.saveLead(lead);
 
-    if (fb) {
+    if (fb && currentUser && navigator.onLine) {
       try {
         await fb.setDoc('leads', lead.id, {
           ...lead,
           syncStatus: 'synced',
-          updatedAtMs: Date.now(),
+          updatedAtMs: now,
           updatedAt: fb.serverTimestamp()
         }, true);
         lead.syncStatus = 'synced';
@@ -1940,15 +2226,304 @@ async function confirmClearFollowUp() {
 
     closeModal('followUpModal');
     await renderLeads();
+    await updateSettingsStats();
     showToast('Cleared follow-up date.');
-    if (navigator.onLine && (officerProfile.webhookUrl || globalConfig.googleSheetsWebhookUrl)) syncLeadToSheet(lead);
+    if (navigator.onLine && getEffectiveWebhookUrl()) syncLeadToSheet(lead, true);
   });
 }
 
-// 13. GOOGLE SHEETS IN-PLACE SYNC (DUAL-KEY UPSERT ENGINE)
-async function syncLeadToSheet(lead) {
-  const url = officerProfile.webhookUrl || globalConfig.googleSheetsWebhookUrl;
-  if (!url) return;
+// 13. GOOGLE SHEETS 2-WAY SYNC (PULL doGet + DUAL-KEY UPSERT doPost)
+function getEffectiveWebhookUrl() {
+  return String(globalConfig.googleSheetsWebhookUrl || officerProfile.webhookUrl || '').trim();
+}
+
+function cleanPhoneDigits(val) {
+  if (!val) return '';
+  let s = String(val).replace(/\D/g, '');
+  if (s.length > 10 && s.startsWith('92')) s = s.substring(2);
+  if (s.length > 10 && s.startsWith('0')) s = s.substring(1);
+  return s;
+}
+
+function parseSheetRowToLead(item, idx = 0) {
+  const rawId = String(item.id || '').trim();
+  const cleanPhone = cleanPhoneDigits(item.mobile || '');
+  const id = rawId || ('sheet-row-' + idx + '-' + (cleanPhone || Date.now()));
+  const rawNotes = String(item.notes || '').trim();
+  const noteLines = rawNotes ? rawNotes.split('\n').map(s => s.trim()).filter(Boolean) : [];
+  const lastNote = noteLines.length > 0 ? cleanRawActionPayload(noteLines[noteLines.length - 1]) : '';
+
+  let parsedLat = (item.latitude !== undefined && item.latitude !== null && Number(item.latitude) !== 0) ? Number(item.latitude) : null;
+  let parsedLng = (item.longitude !== undefined && item.longitude !== null && Number(item.longitude) !== 0) ? Number(item.longitude) : null;
+  const rawLoc = String(item.locationAddress || '').trim();
+  let cleanAddr = rawLoc;
+  if (rawLoc.includes(',')) {
+    const parts = rawLoc.split('|');
+    const sub = parts[0].trim().split(',');
+    if (sub.length === 2) {
+      const latC = parseFloat(sub[0].trim());
+      const lngC = parseFloat(sub[1].trim());
+      if (!isNaN(latC) && !isNaN(lngC) && (latC !== 0 || lngC !== 0)) {
+        if (parsedLat === null) parsedLat = latC;
+        if (parsedLng === null) parsedLng = lngC;
+        cleanAddr = parts.length > 1 ? parts.slice(1).join('|').trim() : '';
+      }
+    }
+  }
+
+  let createdMs = Number(item.createdAtMs) || Number(item.createdAt) || 0;
+  if (!createdMs && item.createdAtFormatted) {
+    const parsedDt = Date.parse(String(item.createdAtFormatted));
+    if (!isNaN(parsedDt)) createdMs = parsedDt;
+  }
+  if (!createdMs) createdMs = Date.now() - (idx * 1000);
+
+  const activities = [];
+  const rawAudit = String(item.activitiesAudit || item.touchpointLog || '').trim();
+  if (rawAudit) {
+    const lines = rawAudit.split('\n').map(l => l.replace(/^•\s*/, '').trim()).filter(Boolean);
+    lines.forEach((line, lIdx) => {
+      const u = line.toUpperCase();
+      let actionType = 'note_update';
+      if (u.includes('NOTE_UPDATE') || u.includes('NOTE ADDED') || u.includes('📝')) actionType = 'note_update';
+      else if (u.includes('FOLLOW_UP') || u.includes('FOLLOW-UP') || u.includes('📅')) actionType = 'follow_up';
+      else if (u.includes('CALL') || u.includes('PHONE') || u.includes('📞')) actionType = 'call';
+      else if (u.includes('WHATSAPP') || u.includes('💬')) actionType = 'whatsapp';
+      else if (u.includes('SMS') || u.includes('✉️')) actionType = 'sms';
+      else if (u.includes('STATUS') || u.includes('🔄')) actionType = 'status_change';
+      else if (u.includes('PROPOSAL') || u.includes('📋')) actionType = 'proposal_update';
+      else if (u.includes('CREATED') || u.includes('🎯')) actionType = 'created';
+
+      const titleMap = {
+        status_change: '🔄 Status Changed',
+        follow_up: '📅 Follow-Up Date',
+        call: '📞 Phone Call',
+        whatsapp: '💬 WhatsApp',
+        sms: '✉️ SMS',
+        created: String(item.category || '').toLowerCase() === 'liability' ? '🎯 Deposit Lead Created' : '🎯 Loan Lead Created',
+        proposal_update: '📋 Proposal Saved',
+        note_update: '📝 Note Added'
+      };
+
+      const timeMatch = line.match(/\[(.*?)\]/);
+      let actTs = createdMs + (lIdx * 1000);
+      if (timeMatch && timeMatch[1]) {
+        const dt = Date.parse(timeMatch[1].trim());
+        if (!isNaN(dt)) actTs = dt;
+      }
+
+      const offMatch = line.match(/-\s*By\s*:\s*(.*?)$/i);
+      let actOff = String(item.officerName || '').trim();
+      let actId = String(item.officerId || '').trim();
+      if (offMatch && offMatch[1]) {
+        const rawOff = offMatch[1].split(/\s*-\s*By:/i)[0].trim();
+        if (rawOff.includes('(') && rawOff.endsWith(')')) {
+          actOff = rawOff.substring(0, rawOff.indexOf('(')).trim() || actOff;
+          actId = rawOff.substring(rawOff.indexOf('(') + 1, rawOff.length - 1).trim() || actId;
+        } else if (rawOff) {
+          actOff = rawOff;
+        }
+      }
+
+      const cleanDet = cleanRawActionPayload(line) || titleMap[actionType];
+      activities.push({
+        id: 'sh-act-' + actTs + '-' + lIdx,
+        timestamp: actTs,
+        actionType,
+        title: titleMap[actionType],
+        details: cleanDet,
+        officerName: actOff,
+        officerId: actId
+      });
+    });
+  }
+
+  return {
+    id,
+    customerName: toTitleCase(String(item.customerName || 'Customer').trim() || 'Customer'),
+    mobile: String(item.mobile || '').trim(),
+    dob: String(item.dob || ''),
+    age: Number(item.age) || 0,
+    monthlyIncome: Number(item.monthlyIncome) || 0,
+    dbrAllowed: Number(item.dbrAllowed) || 50,
+    category: String(item.category || 'asset').trim().toLowerCase() === 'liability' ? 'liability' : 'asset',
+    productId: String(item.productId || ''),
+    productName: String(item.productName || 'Bank Facility'),
+    loanAmount: Number(item.loanAmount) || 0,
+    tenureMonths: Number(item.tenureMonths) || 12,
+    monthlyEmi: Number(item.monthlyEmi) || 0,
+    totalProfit: Number(item.totalProfit) || 0,
+    processingFee: Number(item.processingFee) || 0,
+    isFiler: String(item.isFiler || '').toLowerCase() !== 'non-filer' && item.isFiler !== false,
+    taxRate: Number(item.taxRate) || 0,
+    taxDeducted: Number(item.taxDeducted) || 0,
+    netProfit: Number(item.netProfit) || 0,
+    status: String(item.status || 'New').trim() || 'New',
+    followUpDate: String(item.followUpDate || '').trim(),
+    notes: lastNote,
+    officerName: toTitleCase(String(item.officerName || '').trim()),
+    officerId: String(item.officerId || '').trim(),
+    branchName: toTitleCase(String(item.branchName || '').trim()),
+    userId: String(item.userId || '').trim(),
+    latitude: parsedLat,
+    longitude: parsedLng,
+    locationAddress: cleanAddr,
+    locationCapturedAt: Number(item.locationCapturedAt) || 0,
+    createdAt: createdMs,
+    updatedAtMs: createdMs,
+    syncStatus: currentUser && fb ? 'synced' : 'pending_sync',
+    sheetsSynced: true,
+    approachCount: Number(item.approachCount) || Math.max(1, activities.length),
+    notesUpdateCount: activities.filter(a => a.actionType === 'note_update').length,
+    activities
+  };
+}
+
+function isSheetLeadAuthorizedForCurrentUser(lead) {
+  if (!currentUser && !officerProfile.staffId && !officerProfile.officerName) return true;
+  if (typeof isPrimaryAdminUser === 'function' && isPrimaryAdminUser()) return true;
+  if (currentUserProfile && currentUserProfile.role === 'Admin') return true;
+  if (typeof isLeadOwnedByCurrentOfficer === 'function' && isLeadOwnedByCurrentOfficer(lead)) return true;
+
+  const effAllowed = typeof getEffectiveAllowedBranch === 'function' ? getEffectiveAllowedBranch() : '';
+  if (!effAllowed) return false;
+  const tokens = effAllowed.split(/[,;|]/).map(s => s.trim()).filter(Boolean);
+  if (tokens.some(t => t.toUpperCase() === 'ALL' || t === '*')) return true;
+
+  const leadBranch = typeof resolveLeadEffectiveBranch === 'function' ? resolveLeadEffectiveBranch(lead) : (lead.branchName || '');
+  return tokens.some(tok => typeof isBranchAuthorizedForQuery === 'function' && isBranchAuthorizedForQuery(tok, leadBranch));
+}
+
+async function pullLeadsFromGoogleSheet(silent = false) {
+  const url = getEffectiveWebhookUrl();
+  if (!url) {
+    if (!silent) showToast('⚠️ Configure Google Sheets Web App URL in Admin first.');
+    return { pulledCount: 0, importedCount: 0, pushedToCloudCount: 0 };
+  }
+  if (!navigator.onLine) {
+    if (!silent) showToast('Device is offline.');
+    return { pulledCount: 0, importedCount: 0, pushedToCloudCount: 0 };
+  }
+
+  const runPull = async () => {
+    const controller = new AbortController();
+    const tId = setTimeout(() => controller.abort(), 12000);
+    let resp;
+    try {
+      const fetchUrl = url + (url.includes('?') ? '&' : '?') + '_ts=' + Date.now();
+      resp = await fetch(fetchUrl, { method: 'GET', redirect: 'follow', signal: controller.signal });
+    } finally {
+      clearTimeout(tId);
+    }
+
+    const rawText = await resp.text();
+    const trimmed = rawText.trim();
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status} from Apps Script`);
+    }
+    if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) {
+      throw new Error('Apps Script returned HTML login page. Ensure deployment Access = "Anyone" and v2.3 doGet() is deployed.');
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (e) {
+      throw new Error('Apps Script did not return valid JSON. Redeploy v2.3 with doGet().');
+    }
+
+    const rawRows = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.leads) ? parsed.leads : []);
+    const existingLeads = await LocalDB.getAllLeads();
+    const byId = new Map(existingLeads.map(l => [l.id, l]));
+    const byPhone = new Map();
+    existingLeads.forEach(l => {
+      const p = cleanPhoneDigits(l.mobile);
+      if (p) byPhone.set(p, l);
+    });
+
+    let importedCount = 0;
+    let pushedToCloudCount = 0;
+
+    for (let i = 0; i < rawRows.length; i++) {
+      const row = rawRows[i];
+      if (!row || (!row.customerName && !row.mobile && !row.id)) continue;
+      const candidate = parseSheetRowToLead(row, i);
+      if (!isSheetLeadAuthorizedForCurrentUser(candidate)) continue;
+
+      const phoneKey = cleanPhoneDigits(candidate.mobile);
+      const match = byId.get(candidate.id) || (phoneKey ? byPhone.get(phoneKey) : null);
+
+      if (!match) {
+        if (!candidate.userId && currentUser) candidate.userId = currentUser.uid;
+        await LocalDB.saveLead(candidate);
+        byId.set(candidate.id, candidate);
+        if (phoneKey) byPhone.set(phoneKey, candidate);
+        importedCount++;
+
+        if (fb && currentUser) {
+          try {
+            await fb.setDoc('leads', candidate.id, {
+              ...candidate,
+              syncStatus: 'synced',
+              updatedAtMs: Date.now(),
+              updatedAt: fb.serverTimestamp()
+            }, true);
+            pushedToCloudCount++;
+          } catch (e) {
+            console.warn('Could not mirror Sheet lead to Firestore:', e);
+          }
+        }
+      } else {
+        // Fill missing metadata without clobbering newer Firestore/local state
+        let changed = false;
+        if (!match.notes && candidate.notes) { match.notes = candidate.notes; changed = true; }
+        if (!match.locationAddress && candidate.locationAddress) { match.locationAddress = candidate.locationAddress; changed = true; }
+        if ((match.latitude === null || match.latitude === undefined) && candidate.latitude !== null) {
+          match.latitude = candidate.latitude;
+          match.longitude = candidate.longitude;
+          changed = true;
+        }
+        if ((!match.activities || match.activities.length === 0) && candidate.activities.length > 0) {
+          match.activities = candidate.activities;
+          changed = true;
+        }
+        if (match.sheetsSynced !== true) {
+          match.sheetsSynced = true;
+          changed = true;
+        }
+        if (changed) {
+          await LocalDB.saveLead(match);
+        }
+      }
+    }
+
+    lastCloudSyncTime = Date.now();
+    await renderLeads();
+    await updateSettingsStats();
+    if (adminUnlocked && typeof renderAdminLeadsDbList === 'function') {
+      await renderAdminLeadsDbList();
+    }
+
+    const result = { pulledCount: rawRows.length, importedCount, pushedToCloudCount };
+    if (!silent) {
+      showToast(`✅ Sheet Sync: ${rawRows.length} row(s) checked, ${importedCount} imported${pushedToCloudCount ? ` & ${pushedToCloudCount} synced to Cloud` : ''}!`);
+    }
+    return result;
+  };
+
+  try {
+    if (silent) return await runPull();
+    return await withLoading('Pulling Leads from Google Sheet...', runPull);
+  } catch (err) {
+    console.warn('Pull from Google Sheet warning:', err);
+    if (!silent) showToast('❌ Sheet Pull Error: ' + err.message);
+    return { pulledCount: 0, importedCount: 0, pushedToCloudCount: 0, error: err.message };
+  }
+}
+
+async function syncLeadToSheet(lead, silent = true) {
+  const url = getEffectiveWebhookUrl();
+  if (!url) return false;
 
   const dtFormat = formatDate(lead.createdAt);
   const activities = (lead.activities || []).slice().sort((a, b) => a.timestamp - b.timestamp);
@@ -1956,7 +2531,7 @@ async function syncLeadToSheet(lead) {
   const noteLines = activities.filter(a => a.actionType === 'note_update' && a.details).map(act => {
     const actTime = formatDate(act.timestamp);
     const clean = cleanRawActionPayload(act.details);
-    return `[${actTime}] ${clean} - By: ${act.officerName || 'Officer'}`;
+    return `[${actTime}] ${clean}`;
   });
 
   const commentsHistory = noteLines.length > 0
@@ -1966,17 +2541,31 @@ async function syncLeadToSheet(lead) {
   const touchpointLines = activities.map(act => {
     const actTime = formatDate(act.timestamp);
     const cleanPayload = cleanRawActionPayload(act.details);
-    return `• [${actTime}] ${act.title}: ${cleanPayload} - By: ${act.officerName || 'Officer'}`;
+    return `[${actTime}] ${act.title}: ${cleanPayload} - By: ${act.officerName || 'Officer'}${act.officerId ? ` (${act.officerId})` : ''}`;
   });
   const touchpointLog = touchpointLines.join('\n');
+
+  const hasCoords = lead.latitude !== null && lead.latitude !== undefined && lead.longitude !== null && lead.longitude !== undefined && (Number(lead.latitude) !== 0 || Number(lead.longitude) !== 0);
+  const locFormatted = hasCoords
+    ? `${Number(lead.latitude).toFixed(5)}, ${Number(lead.longitude).toFixed(5)}${lead.locationAddress ? ` | ${lead.locationAddress}` : ''}`
+    : (lead.locationAddress || '');
 
   const payload = {
     action: 'saveLead',
     id: lead.id,
     customerName: toTitleCase(lead.customerName),
     mobile: lead.mobile,
+    dob: lead.dob || '',
+    age: lead.age || 0,
+    monthlyIncome: lead.monthlyIncome || 0,
+    dbrAllowed: lead.dbrAllowed || 50,
+    productId: lead.productId || '',
     productName: lead.productName,
-    category: lead.category,
+    category: lead.category || 'asset',
+    isFiler: lead.isFiler !== false ? 'Filer' : 'Non-Filer',
+    taxRate: lead.taxRate || 0,
+    taxDeducted: lead.taxDeducted || 0,
+    netProfit: lead.netProfit || 0,
     loanAmount: lead.loanAmount,
     tenureMonths: lead.tenureMonths,
     monthlyEmi: lead.monthlyEmi,
@@ -1987,28 +2576,100 @@ async function syncLeadToSheet(lead) {
     notes: commentsHistory,
     officerName: toTitleCase(lead.officerName || officerProfile.officerName),
     officerId: lead.officerId || officerProfile.staffId,
-    branchName: lead.branchName || officerProfile.branchName,
-    locationAddress: lead.locationAddress || '',
+    branchName: toTitleCase(lead.branchName || officerProfile.branchName),
+    userId: lead.userId || (currentUser ? currentUser.uid : ''),
+    latitude: hasCoords ? Number(lead.latitude) : 0,
+    longitude: hasCoords ? Number(lead.longitude) : 0,
+    locationAddress: locFormatted,
     activitiesAudit: touchpointLog,
     touchpointLog: touchpointLog,
     approachCount: lead.approachCount || (activities.length || 1),
+    notesUpdateCount: lead.notesUpdateCount || 0,
+    createdAtMs: lead.createdAt || Date.now(),
     createdAtFormatted: dtFormat,
     timestamp: dtFormat
   };
 
+  let pushed = false;
+  const controller = new AbortController();
+  const tId = setTimeout(() => controller.abort(), 11000);
   try {
-    await fetch(url, {
+    const resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(payload),
-      mode: 'no-cors'
+      redirect: 'follow',
+      signal: controller.signal
     });
-    lead.syncStatus = 'synced';
-    await LocalDB.saveLead(lead);
-    renderLeads();
-  } catch (err) {
-    console.warn('Google Sheets sync warning:', err);
+    clearTimeout(tId);
+    if (resp.ok) {
+      const txt = await resp.text().catch(() => '');
+      try {
+        const json = JSON.parse(txt);
+        pushed = json.status === 'success';
+      } catch (e) {
+        pushed = !txt.trim().startsWith('<');
+      }
+    }
+  } catch (corsErr) {
+    clearTimeout(tId);
+    // Cross-origin redirect preflight/CORS fallback via no-cors text/plain POST
+    try {
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
+        mode: 'no-cors'
+      });
+      pushed = true;
+    } catch (netErr) {
+      console.warn('Google Sheets POST failed:', netErr);
+      if (!silent) showToast('❌ Sheets push failed: ' + netErr.message);
+      pushed = false;
+    }
   }
+
+  lead.sheetsSynced = pushed;
+  await LocalDB.saveLead(lead);
+  await updateSettingsStats();
+  renderLeads();
+  return pushed;
+}
+
+async function flushPendingLeadsToCloudAndSheets(silent = true) {
+  if (!navigator.onLine || isSyncingNow) return { cloudPushed: 0, sheetPushed: 0 };
+  isSyncingNow = true;
+  let cloudPushed = 0;
+  let sheetPushed = 0;
+  try {
+    const leads = await LocalDB.getAllLeads();
+    const webhook = getEffectiveWebhookUrl();
+
+    for (const l of leads) {
+      if (l.syncStatus !== 'synced' && fb && currentUser) {
+        try {
+          await fb.setDoc('leads', l.id, {
+            ...l,
+            syncStatus: 'synced',
+            updatedAtMs: l.updatedAtMs || Date.now(),
+            updatedAt: fb.serverTimestamp()
+          }, true);
+          l.syncStatus = 'synced';
+          await LocalDB.saveLead(l);
+          cloudPushed++;
+        } catch (e) {
+          console.warn('Pending lead Firestore flush error:', e);
+        }
+      }
+      if (webhook && (l.sheetsSynced !== true || l.syncStatus !== 'synced')) {
+        const ok = await syncLeadToSheet(l, true);
+        if (ok) sheetPushed++;
+      }
+    }
+  } finally {
+    isSyncingNow = false;
+  }
+  return { cloudPushed, sheetPushed };
 }
 
 async function manualSync(silent = false) {
@@ -2018,36 +2679,65 @@ async function manualSync(silent = false) {
   }
 
   const runSync = async () => {
+    // 1. Push any pending local leads upward to Firestore & Sheets
+    const pushRes = await flushPendingLeadsToCloudAndSheets(true);
+
+    // 2. Pull fresh Cloud Leads, Products, Users, Config from Firestore
     if (fb && currentUser) {
       try {
-        const snap = await fb.getDocs('leads');
-        snap.forEach(docSnap => {
+        const snap = await Promise.race([
+          fb.getDocs('leads'),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('Firestore timeout')), 9000))
+        ]);
+        const localLeads = await LocalDB.getAllLeads();
+        const localMap = new Map(localLeads.map(l => [l.id, l]));
+
+        for (const docSnap of snap.docs) {
           const d = docSnap.data();
-          LocalDB.saveLead({ id: d.id || docSnap.id, ...d, syncStatus: 'synced' });
-        });
+          const leadId = d.id || docSnap.id;
+          const existing = localMap.get(leadId);
+          if (existing && existing.syncStatus === 'pending_sync' && (Number(existing.updatedAtMs) || 0) > (Number(d.updatedAtMs) || 0)) {
+            continue;
+          }
+          await LocalDB.saveLead({
+            id: leadId,
+            ...d,
+            notes: cleanRawActionPayload(d.notes || ''),
+            syncStatus: 'synced',
+            sheetsSynced: d.sheetsSynced === true || (existing ? Boolean(existing.sheetsSynced) : false)
+          });
+        }
+        await verifyUserAccessAndSyncProfile(currentUser, true);
       } catch (e) {
         console.warn('Firestore manual sync notice:', e);
+        if (!silent) showToast('⚠️ Firestore sync warning: ' + e.message);
       }
     }
 
-    const webhook = officerProfile.webhookUrl || globalConfig.googleSheetsWebhookUrl;
-    if (webhook) {
-      const leads = await LocalDB.getAllLeads();
-      const pending = leads.filter(l => l.syncStatus !== 'synced');
-      for (const l of pending) {
-        await syncLeadToSheet(l);
-      }
+    // 3. Pull any leads from Google Sheets & import Sheet-only rows upward to Cloud
+    let pullRes = { pulledCount: 0, importedCount: 0, error: null };
+    if (getEffectiveWebhookUrl()) {
+      pullRes = await pullLeadsFromGoogleSheet(true);
     }
 
+    lastCloudSyncTime = Date.now();
     await renderLeads();
     await updateSettingsStats();
-    if (!silent) showToast('✅ Synced with Firestore & Google Sheets!');
+    if (!silent) {
+      const sheetNote = pullRes.error
+        ? ` (Sheet Pull: ${pullRes.error})`
+        : (pullRes.importedCount > 0 ? ` • Imported ${pullRes.importedCount} from Sheet` : '');
+      const pushedNote = (pushRes.cloudPushed > 0 || pushRes.sheetPushed > 0)
+        ? ` • Pushed ${Math.max(pushRes.cloudPushed, pushRes.sheetPushed)}`
+        : '';
+      showToast(`✅ Synced with Firestore & Sheets${pushedNote}${sheetNote}!`);
+    }
   };
 
   if (silent) {
     await runSync();
   } else {
-    await withLoading('Syncing with Firestore & Sheets...', runSync);
+    await withLoading('Syncing Firestore & Google Sheets...', runSync);
   }
 }
 
@@ -2057,12 +2747,14 @@ async function loadSettings() {
   officerProfile.staffId = await LocalDB.getSetting('staffId', '');
   officerProfile.branchName = await LocalDB.getSetting('branchName', '');
   officerProfile.webhookUrl = await LocalDB.getSetting('webhookUrl', '');
+  officerProfile.profileUpdatedAt = Number(await LocalDB.getSetting('profileUpdatedAt', 0)) || 0;
 
   if (!officerProfile.webhookUrl && fb) {
     try {
       const configDoc = await fb.getDoc('config', 'global');
       if (configDoc.exists() && configDoc.data().googleSheetsWebhookUrl) {
         officerProfile.webhookUrl = configDoc.data().googleSheetsWebhookUrl;
+        globalConfig.googleSheetsWebhookUrl = officerProfile.webhookUrl;
         await LocalDB.setSetting('webhookUrl', officerProfile.webhookUrl);
       }
     } catch (e) {}
@@ -2082,41 +2774,54 @@ async function loadSettings() {
 
 async function saveSettings() {
   await withLoading('Saving Profile to Cloud...', async () => {
+    const oldBranch = officerProfile.branchName || '';
+    const nowTs = Date.now();
     officerProfile.officerName = toTitleCase(document.getElementById('settingsOfficerName').value.trim() || 'Loan Officer');
-    officerProfile.staffId = document.getElementById('settingsStaffId').value.trim() || 'RO-001';
+    officerProfile.staffId = document.getElementById('settingsStaffId').value.trim().toUpperCase() || 'RO-001';
     const editedBranch = document.getElementById('settingsBranch').value.trim();
     officerProfile.branchName = editedBranch ? toTitleCase(editedBranch) : ((currentUserProfile && currentUserProfile.branchName) || officerProfile.branchName || '');
+    officerProfile.profileUpdatedAt = nowTs;
 
     await LocalDB.setSetting('officerName', officerProfile.officerName);
     await LocalDB.setSetting('staffId', officerProfile.staffId);
     await LocalDB.setSetting('branchName', officerProfile.branchName);
+    await LocalDB.setSetting('profileUpdatedAt', nowTs);
 
-    if (fb && currentUser) {
+    let cloudSynced = false;
+    let cloudErr = '';
+    if (fb && currentUser && navigator.onLine) {
       try {
+        const existingAllowed = (currentUserProfile && currentUserProfile.allowedSupervisorBranch) || '';
+        let nextAllowed = existingAllowed;
+        if (!existingAllowed || (oldBranch && existingAllowed.toLowerCase() === oldBranch.toLowerCase())) {
+          nextAllowed = officerProfile.branchName;
+        }
         const userData = {
           uid: currentUser.uid,
           email: currentUser.email || '',
           officerName: officerProfile.officerName,
           staffId: officerProfile.staffId,
           branchName: officerProfile.branchName,
-          updatedAt: Date.now()
+          allowedSupervisorBranch: nextAllowed,
+          role: (currentUserProfile && currentUserProfile.role) || 'Loan Officer',
+          isBlocked: currentUserProfile ? Boolean(currentUserProfile.isBlocked) : false,
+          canUseSupervisorFilter: currentUserProfile ? currentUserProfile.canUseSupervisorFilter !== false : true,
+          updatedAt: nowTs
         };
-        if (currentUserProfile) {
-          currentUserProfile.officerName = officerProfile.officerName;
-          currentUserProfile.staffId = officerProfile.staffId;
-          currentUserProfile.branchName = officerProfile.branchName;
-          if (!currentUserProfile.allowedSupervisorBranch) {
-            currentUserProfile.allowedSupervisorBranch = officerProfile.branchName;
-            userData.allowedSupervisorBranch = officerProfile.branchName;
-          }
-        }
+        currentUserProfile = { ...userData };
         await fb.setDoc('users', currentUser.uid, userData, true);
         await fb.setDoc('config', 'global', {
-          registeredUsersMap: { [currentUser.uid]: userData }
+          registeredUsersMap: { [currentUser.uid]: userData },
+          updatedAt: fb.serverTimestamp()
         }, true);
+        cloudSynced = true;
+        lastCloudSyncTime = Date.now();
       } catch (e) {
+        cloudErr = e && e.message ? e.message : 'Cloud error';
         console.warn('Firestore profile sync error:', e);
       }
+    } else {
+      cloudErr = !currentUser ? 'Not signed in' : 'Offline';
     }
 
     document.getElementById('settingsOfficerName').value = officerProfile.officerName;
@@ -2126,12 +2831,12 @@ async function saveSettings() {
     document.getElementById('branchBadge').textContent = `🏢 ${officerProfile.branchName || 'Unassigned'}`;
     await renderLeads();
     await updateSettingsStats();
-    showToast('✅ Profile & Branch synced to Cloud!');
+    showToast(cloudSynced ? '✅ Profile & Branch synced to Cloud (Web & Android)!' : `💾 Saved locally (${cloudErr}). Sign in online to sync.`);
   });
 }
 
 async function testConnection(customUrl = null) {
-  const url = String(customUrl !== null ? customUrl : (globalConfig.googleSheetsWebhookUrl || officerProfile.webhookUrl || '')).trim();
+  const url = String(customUrl !== null ? customUrl : getEffectiveWebhookUrl()).trim();
   if (!url) {
     showToast('Please enter Webhook URL in Admin Panel first.');
     return;
@@ -2140,17 +2845,36 @@ async function testConnection(customUrl = null) {
     showToast('⚠️ Enter a valid https://script.google.com/... Web App URL.');
     return;
   }
-  await withLoading('Testing Google Sheets Webhook...', async () => {
+  await withLoading('Testing Google Sheets Webhook (2-Way)...', async () => {
     try {
-      await fetch(url, {
+      const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: 'ping' }),
-        mode: 'no-cors'
+        redirect: 'follow'
       });
-      showToast('✅ Webhook reachable! Ping delivered to Google Apps Script.');
+      const txt = await resp.text().catch(() => '');
+      let parsed = null;
+      try { parsed = JSON.parse(txt); } catch (e) {}
+      if (parsed && parsed.status === 'success') {
+        showToast(`✅ Connected! (${parsed.version || 'v2.3'}) — 2-Way Pull & Push ready.`);
+      } else if (txt.trim().startsWith('<')) {
+        showToast('⚠️ Deployment Access must be "Anyone" (Apps Script returned HTML login page).');
+      } else {
+        showToast('✅ Webhook reachable! Ping delivered to Google Apps Script.');
+      }
     } catch (err) {
-      showToast('❌ Webhook unreachable: ' + err.message);
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'ping' }),
+          mode: 'no-cors'
+        });
+        showToast('✅ Webhook ping delivered! (Browser CORS hid response; test Pull Sheet too.)');
+      } catch (err2) {
+        showToast('❌ Webhook unreachable: ' + err2.message);
+      }
     }
   });
 }
@@ -2160,8 +2884,14 @@ async function updateSettingsStats() {
   const myLeads = leads.filter(isLeadOwnedByCurrentOfficer);
   const totEl = document.getElementById('statTotalLeads');
   const pendEl = document.getElementById('statPendingSync');
+  const lastEl = document.getElementById('statLastSyncTime');
   if (totEl) totEl.textContent = myLeads.length;
-  if (pendEl) pendEl.textContent = myLeads.filter(l => l.syncStatus !== 'synced').length;
+  if (pendEl) pendEl.textContent = myLeads.filter(l => l.syncStatus !== 'synced' || (getEffectiveWebhookUrl() && l.sheetsSynced !== true)).length;
+  if (lastEl) {
+    lastEl.textContent = lastCloudSyncTime
+      ? formatDate(lastCloudSyncTime)
+      : (currentUser ? 'Connected' : 'Local Mode');
+  }
 }
 
 async function exportLeadsJson() {
@@ -2187,27 +2917,61 @@ function showInstallHelp() {
   openModal('installGuideModal');
 }
 
-// 15. MODALS, LOADING OVERLAY, TOASTS & FORMATTING HELPERS
+// 15. MODALS, FAIL-SAFE LOADING OVERLAY, TOASTS & FORMATTING HELPERS
 function showLoading(message = 'Processing...') {
   activeLoadingCount++;
   const ov = document.getElementById('globalLoadingOverlay');
   const txt = document.getElementById('globalLoadingText');
+  const dismissBtn = document.getElementById('loadingDismissBtn');
   if (txt) txt.textContent = message;
+  if (dismissBtn) dismissBtn.style.display = 'none';
   if (ov) ov.classList.add('active');
+
+  if (loadingDismissTimer) clearTimeout(loadingDismissTimer);
+  loadingDismissTimer = setTimeout(() => {
+    const btn = document.getElementById('loadingDismissBtn');
+    if (btn && activeLoadingCount > 0) btn.style.display = 'inline-block';
+  }, 5000);
+
+  if (loadingFailSafeTimer) clearTimeout(loadingFailSafeTimer);
+  loadingFailSafeTimer = setTimeout(() => {
+    if (activeLoadingCount > 0) {
+      forceHideLoading();
+      showToast('⏱️ Network took too long — continued in background.');
+    }
+  }, 18000);
+}
+
+function forceHideLoading() {
+  activeLoadingCount = 0;
+  if (loadingDismissTimer) { clearTimeout(loadingDismissTimer); loadingDismissTimer = null; }
+  if (loadingFailSafeTimer) { clearTimeout(loadingFailSafeTimer); loadingFailSafeTimer = null; }
+  const ov = document.getElementById('globalLoadingOverlay');
+  const dismissBtn = document.getElementById('loadingDismissBtn');
+  if (dismissBtn) dismissBtn.style.display = 'none';
+  if (ov) ov.classList.remove('active');
 }
 
 function hideLoading() {
   activeLoadingCount = Math.max(0, activeLoadingCount - 1);
   if (activeLoadingCount === 0) {
-    const ov = document.getElementById('globalLoadingOverlay');
-    if (ov) ov.classList.remove('active');
+    forceHideLoading();
   }
 }
 
 async function withLoading(message, asyncFn) {
   showLoading(message);
   try {
-    return await asyncFn();
+    return await Promise.race([
+      Promise.resolve().then(asyncFn),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Operation timed out on slow connection')), 16000))
+    ]);
+  } catch (err) {
+    console.warn('withLoading error:', err);
+    if (err && err.message && err.message.includes('timed out')) {
+      showToast('⏱️ Request timed out on slow network.');
+    }
+    throw err;
   } finally {
     hideLoading();
   }

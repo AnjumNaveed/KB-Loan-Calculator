@@ -1295,6 +1295,8 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
   private var heartbeatJob: Job? = null
   private val deletedLeadIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
   private val isSyncingLeads = java.util.concurrent.atomic.AtomicBoolean(false)
+  @Volatile
+  private var localProfileUpdatedAt: Long = 0L
 
   private val _uiState = MutableStateFlow(LoanUiState(isOnline = false))
   val uiState: StateFlow<LoanUiState> = _uiState.asStateFlow()
@@ -1421,7 +1423,8 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
           profile = state.profile,
           leads = state.leads,
           userId = uid,
-          userEmail = email
+          userEmail = email,
+          profileUpdatedAt = localProfileUpdatedAt
         )
       }
     }
@@ -1431,7 +1434,7 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
     stopFirestoreSync()
 
     // Immediately sync current user's profile to both /config/global and /users/{userId}
-    // (creates blocked user by default if new so Admin on any other device sees them right away)
+    // Respecting localProfileUpdatedAt so newer Web edits are never overwritten
     val initialState = _uiState.value
     val effectiveEmail = userEmail.ifBlank { initialState.authUserEmail.orEmpty() }
     val effectiveName = initialState.profile.officerName.ifBlank {
@@ -1445,7 +1448,8 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
         email = effectiveEmail,
         officerName = effectiveName,
         staffId = initialState.profile.staffId,
-        branchName = initialState.profile.branchName
+        branchName = initialState.profile.branchName,
+        localUpdatedAt = localProfileUpdatedAt
       )
     }
 
@@ -1523,20 +1527,30 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
                 (myEmail.isNotEmpty() && u.email.equals(myEmail, ignoreCase = true)) ||
                 (myStaffId.isNotEmpty() && u.staffId.equals(myStaffId, ignoreCase = true))
             }
-            val syncedName = if (s.profile.officerName.isBlank() && myRecord != null && myRecord.officerName.isNotBlank()) {
-              prefs.edit().putString("officer_name", myRecord.officerName).apply()
+            val remoteTs = myRecord?.updatedAt ?: 0L
+            val remoteIsNewer = myRecord != null && remoteTs > localProfileUpdatedAt
+            val syncedName = if (myRecord != null && myRecord.officerName.isNotBlank() && (remoteIsNewer || s.profile.officerName.isBlank())) {
+              if (myRecord.officerName != s.profile.officerName) {
+                prefs.edit().putString("officer_name", myRecord.officerName).apply()
+              }
               myRecord.officerName
             } else s.profile.officerName
-            val syncedStaffId = if (s.profile.staffId.isBlank() && myRecord != null && myRecord.staffId.isNotBlank()) {
-              prefs.edit().putString("staff_id", myRecord.staffId).apply()
+            val syncedStaffId = if (myRecord != null && myRecord.staffId.isNotBlank() && (remoteIsNewer || s.profile.staffId.isBlank())) {
+              if (myRecord.staffId != s.profile.staffId) {
+                prefs.edit().putString("staff_id", myRecord.staffId).apply()
+              }
               myRecord.staffId
             } else s.profile.staffId
-            val syncedBranch = if (myRecord != null && myRecord.branchName.isNotBlank()) {
+            val syncedBranch = if (myRecord != null && myRecord.branchName.isNotBlank() && (remoteIsNewer || s.profile.branchName.isBlank())) {
               if (myRecord.branchName != s.profile.branchName) {
                 prefs.edit().putString("branch_name", myRecord.branchName).apply()
               }
               myRecord.branchName
             } else s.profile.branchName
+            if (remoteIsNewer && remoteTs > 0L) {
+              localProfileUpdatedAt = remoteTs
+              prefs.edit().putLong("profile_updated_at", remoteTs).apply()
+            }
             val syncedOnboarded = s.profile.isOnboarded || (syncedStaffId.isNotBlank() && syncedBranch.isNotBlank())
             if (syncedOnboarded && !s.profile.isOnboarded) {
               prefs.edit().putBoolean("is_onboarded", true).apply()
@@ -1597,20 +1611,30 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
               (myEmail.isNotEmpty() && u.email.equals(myEmail, ignoreCase = true)) ||
               (myStaffId.isNotEmpty() && u.staffId.equals(myStaffId, ignoreCase = true))
           }
-          val syncedName = if (s.profile.officerName.isBlank() && myRecord != null && myRecord.officerName.isNotBlank()) {
-            prefs.edit().putString("officer_name", myRecord.officerName).apply()
+          val remoteTs = myRecord?.updatedAt ?: 0L
+          val remoteIsNewer = myRecord != null && remoteTs > localProfileUpdatedAt
+          val syncedName = if (myRecord != null && myRecord.officerName.isNotBlank() && (remoteIsNewer || s.profile.officerName.isBlank())) {
+            if (myRecord.officerName != s.profile.officerName) {
+              prefs.edit().putString("officer_name", myRecord.officerName).apply()
+            }
             myRecord.officerName
           } else s.profile.officerName
-          val syncedStaffId = if (s.profile.staffId.isBlank() && myRecord != null && myRecord.staffId.isNotBlank()) {
-            prefs.edit().putString("staff_id", myRecord.staffId).apply()
+          val syncedStaffId = if (myRecord != null && myRecord.staffId.isNotBlank() && (remoteIsNewer || s.profile.staffId.isBlank())) {
+            if (myRecord.staffId != s.profile.staffId) {
+              prefs.edit().putString("staff_id", myRecord.staffId).apply()
+            }
             myRecord.staffId
           } else s.profile.staffId
-          val syncedBranch = if (myRecord != null && myRecord.branchName.isNotBlank()) {
+          val syncedBranch = if (myRecord != null && myRecord.branchName.isNotBlank() && (remoteIsNewer || s.profile.branchName.isBlank())) {
             if (myRecord.branchName != s.profile.branchName) {
               prefs.edit().putString("branch_name", myRecord.branchName).apply()
             }
             myRecord.branchName
           } else s.profile.branchName
+          if (remoteIsNewer && remoteTs > 0L) {
+            localProfileUpdatedAt = remoteTs
+            prefs.edit().putLong("profile_updated_at", remoteTs).apply()
+          }
           val syncedOnboarded = s.profile.isOnboarded || (syncedStaffId.isNotBlank() && syncedBranch.isNotBlank())
           if (syncedOnboarded && !s.profile.isOnboarded) {
             prefs.edit().putBoolean("is_onboarded", true).apply()
@@ -1853,6 +1877,7 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
     val officerName = prefs.getString("officer_name", "") ?: ""
     val staffId = prefs.getString("staff_id", "") ?: ""
     val branchName = prefs.getString("branch_name", "") ?: ""
+    localProfileUpdatedAt = prefs.getLong("profile_updated_at", 0L)
     val fedRate = prefs.getFloat("fed_rate", 16.0f).toDouble()
     val filerTaxRate = prefs.getFloat("filer_tax_rate", 20.0f).toDouble()
     val nonFilerTaxRate = prefs.getFloat("non_filer_tax_rate", 40.0f).toDouble()
@@ -1876,12 +1901,11 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
     val savedDeletedLeadIds = prefs.getStringSet("deleted_lead_ids", emptySet())?.toSet() ?: emptySet()
     deletedLeadIds.addAll(savedDeletedLeadIds)
 
-    // Load Leads from SharedPreferences
+    // Load Leads from SharedPreferences (preserve all kb-lead-* records created on Web/PWA!)
     val leadsJson = prefs.getString("saved_leads", null)
     val loadedLeads = if (!leadsJson.isNullOrBlank()) {
       parseLeadsJson(leadsJson).filterNot {
         it.id in deletedLeadIds ||
-        it.id.startsWith("kb-lead-") || it.id.startsWith("lead-") ||
         it.customerName.contains("Tariq Mahmood", ignoreCase = true) ||
         it.customerName.contains("Ayesha Siddiqui", ignoreCase = true)
       }
@@ -1963,6 +1987,7 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
       .putString("officer_name", state.profile.officerName)
       .putString("staff_id", state.profile.staffId)
       .putString("branch_name", state.profile.branchName)
+      .putLong("profile_updated_at", localProfileUpdatedAt)
       .remove("admin_pin")
       .putFloat("fed_rate", state.profile.fedRate.toFloat())
       .putFloat("filer_tax_rate", state.profile.filerTaxRate.toFloat())
@@ -1983,6 +2008,9 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
     val cleanName = name.trim()
     val cleanStaffId = staffId.trim()
     val cleanBranch = branch.trim()
+    val editNow = System.currentTimeMillis()
+    localProfileUpdatedAt = editNow
+    prefs.edit().putLong("profile_updated_at", editNow).apply()
     val updatedProfile = _uiState.value.profile.copy(
       officerName = cleanName,
       staffId = cleanStaffId,
@@ -2006,7 +2034,7 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
       staffId = cleanStaffId.ifBlank { existingUser.staffId },
       branchName = cleanBranch.ifBlank { existingUser.branchName },
       allowedSupervisorBranch = existingUser.allowedSupervisorBranch.ifBlank { cleanBranch },
-      updatedAt = System.currentTimeMillis()
+      updatedAt = editNow
     ) ?: RegisteredUser(
       uid = uid,
       email = email,
@@ -2017,7 +2045,7 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
       canUseSupervisorFilter = true,
       isBlocked = true,
       role = "Loan Officer",
-      updatedAt = System.currentTimeMillis()
+      updatedAt = editNow
     )
 
     val keysToClear = buildUserDeleteKeys(registeredRecord)
@@ -2060,6 +2088,9 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
     val cleanName = name.trim()
     val cleanStaffId = staffId.trim()
     val cleanBranch = branch.trim()
+    val editNow = System.currentTimeMillis()
+    localProfileUpdatedAt = editNow
+    prefs.edit().putLong("profile_updated_at", editNow).apply()
     val updated = _uiState.value.profile.copy(
       officerName = cleanName,
       staffId = cleanStaffId,
@@ -2081,7 +2112,7 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
       staffId = cleanStaffId,
       branchName = cleanBranch,
       allowedSupervisorBranch = existing?.allowedSupervisorBranch?.ifBlank { cleanBranch } ?: cleanBranch,
-      updatedAt = System.currentTimeMillis()
+      updatedAt = editNow
     )
     val keysToClear = buildUserDeleteKeys(updatedUserRecord)
     _uiState.update { s ->
@@ -3757,6 +3788,7 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
 
         // 2b. If Google Sheets Webhook URL is configured, pull authorized leads from Google Sheet
         // Strictly restore only leads that this officer authored OR belongs to their authorized branch(es)
+        // Also upsert any Sheet-only leads upward into Firestore so Web & other devices see them
         if (targetSheetsUrl.isNotBlank()) {
           try {
             val sheetFetch = sheetsRepo.fetchLeadsFromGoogleSheet(targetSheetsUrl)
@@ -3764,11 +3796,23 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
               val sheetLeads = sheetFetch.getOrNull().orEmpty()
               if (sheetLeads.isNotEmpty()) {
                 val currentState = _uiState.value
+                val existingIds = currentState.leads.map { it.id }.toSet()
                 val authorizedSheetLeads = sheetLeads.filter { lead ->
-                  currentState.isLeadOwnedByCurrentUser(lead) || currentState.isLeadPermittedForUser(lead)
+                  lead.id !in deletedLeadIds &&
+                    (currentState.isLeadOwnedByCurrentUser(lead) || currentState.isLeadPermittedForUser(lead))
                 }
                 if (authorizedSheetLeads.isNotEmpty()) {
                   mergeRemoteLeadsIntoState(authorizedSheetLeads, emptySet())
+                  if (uid != null) {
+                    val sheetOnly = authorizedSheetLeads.filter { it.id !in existingIds }
+                    for (sl in sheetOnly) {
+                      try {
+                        withTimeout(5_000L) {
+                          firestoreRepo.saveLead(sl.copy(syncStatus = "synced"), sl.userId.ifBlank { uid })
+                        }
+                      } catch (_: Exception) {}
+                    }
+                  }
                 }
               }
             }

@@ -19,6 +19,37 @@
   <script src="https://accounts.google.com/gsi/client" async defer onload="window.dispatchEvent(new Event('gis-script-ready'))"></script>
 </head>
 <body>
+  <!-- Mobile Boot Recovery Banner (hidden unless script/boot fails) -->
+  <div id="bootRecoveryBanner" style="display:none; background:#FEF2F2; color:#991B1B; border-bottom:2px solid #EF4444; padding:10px 14px; font-size:0.8rem; font-weight:700; text-align:center; z-index:9999; position:relative;">
+    <span id="bootRecoveryText">⚠️ App loading delayed or cached version out of date.</span>
+    <button type="button" onclick="clearAppCacheAndReload()" style="margin-left:8px; padding:4px 10px; border-radius:6px; border:1px solid #DC2626; background:#DC2626; color:#fff; font-weight:800; cursor:pointer;">🔄 Clear Cache &amp; Reload</button>
+  </div>
+
+  <script>
+    window.clearAppCacheAndReload = async function () {
+      try {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(r => r.unregister()));
+        }
+        if ('caches' in window) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map(k => caches.delete(k)));
+        }
+      } catch (e) {}
+      window.location.reload();
+    };
+    window.addEventListener('error', function (ev) {
+      if (ev && ev.message && (ev.message.includes('ResizeObserver') || ev.message.includes('Script error'))) return;
+      var banner = document.getElementById('bootRecoveryBanner');
+      if (banner && !window.__kblAppBooted) {
+        banner.style.display = 'block';
+        var txt = document.getElementById('bootRecoveryText');
+        if (txt && ev.message) txt.textContent = '⚠️ Startup issue detected (' + ev.message + ').';
+      }
+    });
+  </script>
+
   <!-- Toast Feedback -->
   <div id="toastBanner" class="toast-banner"></div>
 
@@ -27,6 +58,7 @@
     <div class="loading-card">
       <div class="spinner-ring"></div>
       <div id="globalLoadingText" class="loading-text">Processing...</div>
+      <button type="button" id="loadingDismissBtn" onclick="forceHideLoading()" style="display:none; margin-top:10px; padding:5px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text-main); font-size:0.75rem; font-weight:700; cursor:pointer;">Cancel / Continue</button>
     </div>
   </div>
 
@@ -541,8 +573,9 @@
               <div class="btn-group">
                 <button type="button" class="btn btn-success btn-sm" onclick="adminSaveSheetsUrl()">💾 Save &amp; Sync URL</button>
                 <button type="button" class="btn btn-outline btn-sm" onclick="testConnection(document.getElementById('adminWebhookUrl').value)">⚡ Test</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="pullLeadsFromGoogleSheet(false)">⬇️ Pull Sheet</button>
               </div>
-              <button type="button" class="btn btn-soft btn-sm" style="margin-top: 8px;" onclick="openModal('scriptGuideModal')">📋 View &amp; Copy Apps Script Code (v2.2)</button>
+              <button type="button" class="btn btn-soft btn-sm" style="margin-top: 8px;" onclick="openModal('scriptGuideModal')">📋 View &amp; Copy Apps Script Code (v2.3)</button>
             </div>
           </div>
 
@@ -799,12 +832,17 @@
             <span>My Pending Sync Leads:</span>
             <strong id="statPendingSync">0</strong>
           </div>
+          <div class="result-row">
+            <span>Last Cloud / Sheet Sync:</span>
+            <strong id="statLastSyncTime">Checking...</strong>
+          </div>
           <p style="font-size: 0.74rem; color: var(--text-muted); margin-top: 6px;">
             یہ سیکشن صرف آپ کی اپنی ذاتی لیڈز کا بیک اپ رکھتا ہے (کسی دوسرے آفیسر یا برانچ کا ڈیٹا اس میں شامل نہیں ہوتا)۔
           </p>
           <div class="btn-group">
             <button type="button" class="btn btn-outline" onclick="exportLeadsJson()">📥 Backup My Leads (JSON)</button>
             <button type="button" class="btn btn-success" onclick="manualSync()">🔄 Sync Now</button>
+            <button type="button" class="btn btn-outline" onclick="clearAppCacheAndReload()" title="Use if mobile browser shows stale screen">🧹 Reset Cache</button>
           </div>
         </div>
       </div>
@@ -1170,13 +1208,13 @@
     <div class="modal-overlay" id="scriptGuideModal">
       <div class="modal-dialog modal-lg">
         <div class="modal-header">
-          <div class="modal-title">📋 Google Apps Script Setup (v2.2 In-Place Upsert)</div>
+          <div class="modal-title">📋 Google Apps Script Setup (v2.3 2-Way Pull &amp; Upsert)</div>
           <button type="button" class="modal-close" onclick="closeModal('scriptGuideModal')">&times;</button>
         </div>
         <div class="modal-body">
           <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 10px; line-height: 1.5;">
             1. Open your Google Sheet ➔ <strong>Extensions &gt; Apps Script</strong>.<br>
-            2. Replace all existing code with the snippet below, Save, and click <strong>Deploy &gt; New Deployment (Web App, Access: Anyone)</strong>.
+            2. Replace all existing code with the snippet below, Save, and click <strong>Deploy &gt; Manage deployments &gt; Edit (✏️) &gt; Version: New version &gt; Deploy</strong> (Execute as: <em>Me</em>, Access: <em>Anyone</em>).
           </p>
           <pre id="appsScriptCodePre" style="background: #0F172A; color: #38BDF8; padding: 12px; border-radius: 8px; font-size: 0.74rem; max-height: 320px; overflow: auto;"></pre>
           <div class="btn-group">
@@ -1329,7 +1367,8 @@
     import {
       initializeFirestore,
       persistentLocalCache,
-      persistentMultipleTabManager,
+      persistentSingleTabManager,
+      memoryLocalCache,
       collection,
       doc,
       getDoc,
@@ -1354,52 +1393,62 @@
 
     const FIRESTORE_DB_ID = "ai-studio-android-kbloanca-5f0d5d03-e822-4052-b56a-dc1ece39eefb";
 
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    let db;
     try {
-      db = initializeFirestore(app, {
-        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
-      }, FIRESTORE_DB_ID);
-    } catch (e) {
-      db = initializeFirestore(app, {}, FIRESTORE_DB_ID);
+      const app = initializeApp(firebaseConfig);
+      const auth = getAuth(app);
+      let db;
+      try {
+        db = initializeFirestore(app, {
+          localCache: persistentLocalCache({ tabManager: persistentSingleTabManager({ forceOwnership: true }) }),
+          experimentalAutoDetectLongPolling: true
+        }, FIRESTORE_DB_ID);
+      } catch (cacheErr) {
+        console.warn("Persistent cache fallback to memory:", cacheErr);
+        db = initializeFirestore(app, {
+          localCache: memoryLocalCache(),
+          experimentalAutoDetectLongPolling: true
+        }, FIRESTORE_DB_ID);
+      }
+
+      window.FirebaseBridge = {
+        auth,
+        db,
+        onAuthStateChanged: (cb) => onAuthStateChanged(auth, cb),
+        signInWithGoogleIdToken: (idToken) => {
+          const credential = GoogleAuthProvider.credential(idToken);
+          return signInWithCredential(auth, credential);
+        },
+        signInWithGooglePopup: () => {
+          const provider = new GoogleAuthProvider();
+          provider.addScope("profile");
+          provider.addScope("email");
+          return signInWithPopup(auth, provider);
+        },
+        signInWithGoogleRedirect: () => {
+          const provider = new GoogleAuthProvider();
+          provider.addScope("profile");
+          provider.addScope("email");
+          return signInWithRedirect(auth, provider);
+        },
+        getRedirectResult: () => getRedirectResult(auth),
+        signOut: () => signOut(auth),
+        getDoc: (colName, docId) => getDoc(doc(db, colName, docId)),
+        getDocs: (colName) => getDocs(collection(db, colName)),
+        setDoc: (colName, docId, data, merge = true) => setDoc(doc(db, colName, docId), data, { merge }),
+        deleteDoc: (colName, docId) => deleteDoc(doc(db, colName, docId)),
+        deleteField: () => deleteField(),
+        arrayUnion: (...items) => arrayUnion(...items),
+        arrayRemove: (...items) => arrayRemove(...items),
+        onCollectionSnapshot: (colName, onNext, onErr) => onSnapshot(collection(db, colName), onNext, onErr),
+        onDocSnapshot: (colName, docId, onNext, onErr) => onSnapshot(doc(db, colName, docId), onNext, onErr),
+        serverTimestamp: () => serverTimestamp()
+      };
+
+      window.dispatchEvent(new Event("firebase-bridge-ready"));
+    } catch (bridgeErr) {
+      console.warn("Firebase Web Bridge initialization warning:", bridgeErr);
+      window.dispatchEvent(new CustomEvent("firebase-bridge-error", { detail: bridgeErr }));
     }
-
-    window.FirebaseBridge = {
-      auth,
-      db,
-      onAuthStateChanged: (cb) => onAuthStateChanged(auth, cb),
-      signInWithGoogleIdToken: (idToken) => {
-        const credential = GoogleAuthProvider.credential(idToken);
-        return signInWithCredential(auth, credential);
-      },
-      signInWithGooglePopup: () => {
-        const provider = new GoogleAuthProvider();
-        provider.addScope("profile");
-        provider.addScope("email");
-        return signInWithPopup(auth, provider);
-      },
-      signInWithGoogleRedirect: () => {
-        const provider = new GoogleAuthProvider();
-        provider.addScope("profile");
-        provider.addScope("email");
-        return signInWithRedirect(auth, provider);
-      },
-      getRedirectResult: () => getRedirectResult(auth),
-      signOut: () => signOut(auth),
-      getDoc: (colName, docId) => getDoc(doc(db, colName, docId)),
-      getDocs: (colName) => getDocs(collection(db, colName)),
-      setDoc: (colName, docId, data, merge = true) => setDoc(doc(db, colName, docId), data, { merge }),
-      deleteDoc: (colName, docId) => deleteDoc(doc(db, colName, docId)),
-      deleteField: () => deleteField(),
-      arrayUnion: (...items) => arrayUnion(...items),
-      arrayRemove: (...items) => arrayRemove(...items),
-      onCollectionSnapshot: (colName, onNext, onErr) => onSnapshot(collection(db, colName), onNext, onErr),
-      onDocSnapshot: (colName, docId, onNext, onErr) => onSnapshot(doc(db, colName, docId), onNext, onErr),
-      serverTimestamp: () => serverTimestamp()
-    };
-
-    window.dispatchEvent(new Event("firebase-bridge-ready"));
   </script>
 
   <script src="./calc-engine.js"></script>

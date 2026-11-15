@@ -38,25 +38,27 @@ function doPost(e) {
 
     if (data.action === "ping") {
       return ContentService.createTextOutput(JSON.stringify({
-        status: "success", version: "2.2-dual-key-upsert", message: "KB App Connected Successfully!"
+        status: "success",
+        version: "2.3-dual-key-2way",
+        message: "KB App Connected Successfully (2-Way Pull/Push Active)!"
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
     if (data.action === "delete_leads" || data.action === "delete_lead") {
       var deleteIds = data.deleteIds || data.leadIds || (data.leadId ? [data.leadId] : []);
-      var deleteMobiles = (data.mobiles || []).map(cleanDigits).filter(Boolean);
+      var deleteMobiles = (data.mobiles || (data.mobile ? [data.mobile] : [])).map(cleanDigits).filter(Boolean);
       var lastRow = sheet.getLastRow();
       if (lastRow > 1 && (deleteIds.length > 0 || deleteMobiles.length > 0)) {
         var vals = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
         for (var r = vals.length - 1; r >= 0; r--) {
           var rowId = String(vals[r][0]).trim();
           var rowMob = cleanDigits(vals[r][3]);
-          if (deleteIds.indexOf(rowId) !== -1 || (rowMob && deleteMobiles.indexOf(rowMob) !== -1)) {
+          if ((rowId && deleteIds.indexOf(rowId) !== -1) || (rowMob && deleteMobiles.indexOf(rowMob) !== -1)) {
             sheet.deleteRow(r + 2);
           }
         }
       }
-      return ContentService.createTextOutput(JSON.stringify({ status: "success" })).setMimeType(ContentService.MimeType.JSON);
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", action: "deleted" })).setMimeType(ContentService.MimeType.JSON);
     }
 
     var leads = data.leads || [data];
@@ -68,8 +70,9 @@ function doPost(e) {
       for (var r = 0; r < existingData.length; r++) {
         var eId = String(existingData[r][0]).trim();
         var ePhone = cleanDigits(existingData[r][3]);
-        if (eId) idToRowMap[eId] = r + 2;
-        if (ePhone) phoneToRowMap[ePhone] = r + 2;
+        var rowIndex = r + 2;
+        if (eId) idToRowMap[eId] = rowIndex;
+        if (ePhone) phoneToRowMap[ePhone] = rowIndex;
       }
     }
 
@@ -86,19 +89,86 @@ function doPost(e) {
         l.followUpDate || "", l.officerName || "", l.officerId || "", l.branchName || "",
         l.notes || "", l.approachCount || 1, l.locationAddress || "", auditText
       ];
-      var targetRow = idToRowMap[leadId] || phoneToRowMap[cleanPhone] || null;
+      var targetRow = (leadId && idToRowMap[leadId]) || (cleanPhone && phoneToRowMap[cleanPhone]) || null;
       if (targetRow) {
         sheet.getRange(targetRow, 1, 1, 20).setValues([rowData]);
       } else {
         sheet.appendRow(rowData);
+        var newRowIndex = sheet.getLastRow();
+        if (leadId) idToRowMap[leadId] = newRowIndex;
+        if (cleanPhone) phoneToRowMap[cleanPhone] = newRowIndex;
       }
     }
-    return ContentService.createTextOutput(JSON.stringify({ status: "success" })).setMimeType(ContentService.MimeType.JSON);
+
+    var updatedLastRow = sheet.getLastRow();
+    if (updatedLastRow > 1) {
+      sheet.getRange(2, 17, updatedLastRow - 1, 1).setWrap(true);
+      sheet.getRange(2, 20, updatedLastRow - 1, 1).setWrap(true);
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({ status: "success", version: "2.3-dual-key-2way", count: leads.length })).setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() })).setMimeType(ContentService.MimeType.JSON);
   } finally {
     lock.releaseLock();
   }
+}
+
+function formatCellDate(val, tz) {
+  if (!val) return "";
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    return Utilities.formatDate(val, tz, "yyyy-MM-dd hh:mm a");
+  }
+  return String(val).trim();
+}
+
+function formatSheetMobile(val) {
+  var s = String(val || "").trim();
+  if (/^3\\d{9}$/.test(s)) return "0" + s;
+  return s;
+}
+
+function doGet(e) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Leads") || ss.getActiveSheet();
+  var tz = ss.getSpreadsheetTimeZone() || "Asia/Karachi";
+  var lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "success", version: "2.3-dual-key-2way", leads: [] })).setMimeType(ContentService.MimeType.JSON);
+  }
+  var numCols = Math.max(20, sheet.getLastColumn());
+  var data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
+  var leads = [];
+  for (var i = 0; i < data.length; i++) {
+    var r = data[i];
+    var cust = String(r[2] || "").trim();
+    var mob = formatSheetMobile(r[3]);
+    if (!cust && !mob && !String(r[0] || "").trim()) continue;
+    var rowId = String(r[0] || "").trim() || ("sheet-row-" + (i + 2) + "-" + (cleanDigits(mob) || "lead"));
+    leads.push({
+      id: rowId,
+      createdAtFormatted: formatCellDate(r[1], tz),
+      customerName: cust || "Customer",
+      mobile: mob,
+      category: String(r[4] || "asset").trim().toLowerCase() === "liability" ? "liability" : "asset",
+      productName: String(r[5] || ""),
+      loanAmount: Number(r[6]) || 0,
+      tenureMonths: Number(r[7]) || 0,
+      monthlyEmi: Number(r[8]) || 0,
+      totalProfit: Number(r[9]) || 0,
+      processingFee: Number(r[10]) || 0,
+      status: String(r[11] || "New").trim() || "New",
+      followUpDate: formatCellDate(r[12], tz),
+      officerName: String(r[13] || "").trim(),
+      officerId: String(r[14] || "").trim(),
+      branchName: String(r[15] || "").trim(),
+      notes: String(r[16] || ""),
+      approachCount: Number(r[17]) || 1,
+      locationAddress: String(r[18] || ""),
+      activitiesAudit: String(r[19] || "")
+    });
+  }
+  return ContentService.createTextOutput(JSON.stringify({ status: "success", version: "2.3-dual-key-2way", leads: leads })).setMimeType(ContentService.MimeType.JSON);
 }`;
 
 // =========================================================================
@@ -577,7 +647,7 @@ async function renderLeads() {
             ${lead.dob ? `<div><strong>DOB / Age:</strong> ${escapeHtml(lead.dob)} (${lead.age || 0} Yrs)</div>` : ''}
             ${lead.monthlyIncome ? `<div><strong>Income / DBR:</strong> PKR ${formatPKR(lead.monthlyIncome)} (${lead.dbrAllowed || 50}%)</div>` : ''}
             <div><strong>Follow-Up:</strong> ${lead.followUpDate ? escapeHtml(lead.followUpDate) : 'None'}</div>
-            <div><strong>Cloud Sync:</strong> ${lead.syncStatus === 'synced' ? '✅ Synced' : '⏳ Pending'}</div>
+            <div><strong>Sync Status:</strong> ${lead.syncStatus === 'synced' ? '☁️ Synced' : '⏳ Cloud Pending'} • ${lead.sheetsSynced === true ? '📊 Sheet' : (typeof getEffectiveWebhookUrl === 'function' && getEffectiveWebhookUrl() ? '⏳ Sheet Pending' : '📊 Sheet Off')}</div>
           </div>
 
           ${mapCardHtml}
@@ -825,24 +895,36 @@ async function adminSaveSheetsUrl() {
     officerProfile.webhookUrl = url;
     globalConfig.googleSheetsWebhookUrl = url;
     await LocalDB.setSetting('webhookUrl', url);
+    await LocalDB.setSetting('cachedGlobalWebhookUrl', url);
 
-    if (fb) {
+    let cloudSynced = false;
+    let cloudErr = '';
+    if (fb && currentUser && navigator.onLine) {
       try {
         await fb.setDoc('config', 'global', {
           googleSheetsWebhookUrl: url,
           updatedAt: fb.serverTimestamp()
         }, true);
+        cloudSynced = true;
       } catch (e) {
+        cloudErr = e.message;
         console.warn('Error saving webhook URL:', e);
       }
     }
     populateAdminControls();
-    showToast('✅ Google Sheets Webhook URL synced globally!');
+    if (!cloudSynced) {
+      showToast(cloudErr ? `⚠️ Saved locally only (${cloudErr})` : '⚠️ Saved locally only. Sign in online to sync URL to Android.');
+    } else {
+      showToast('✅ Google Sheets Webhook URL synced globally!');
+      if (url && typeof pullLeadsFromGoogleSheet === 'function') {
+        pullLeadsFromGoogleSheet(true).catch(() => {});
+      }
+    }
   });
 }
 
 function copyAppsScriptCode() {
-  copyToClipboard(APPS_SCRIPT_TEMPLATE, '📋 Google Apps Script v2.2 code copied!');
+  copyToClipboard(APPS_SCRIPT_TEMPLATE, '📋 Google Apps Script v2.3 (2-Way Pull/Push) copied!');
 }
 
 // Card 3: Change Admin Password
@@ -903,19 +985,23 @@ async function adminSaveTaxAndFedConfig() {
     globalConfig.nonFilerTaxRate = nonFilerTaxRate;
     globalConfig.currency = currency;
 
-    if (fb) {
+    let synced = false;
+    let errMsg = '';
+    if (fb && currentUser && navigator.onLine) {
       try {
         await fb.setDoc('config', 'global', {
           fedRate, filerTaxRate, nonFilerTaxRate, currency,
           updatedAt: fb.serverTimestamp()
         }, true);
+        synced = true;
       } catch (e) {
+        errMsg = e.message;
         console.warn('Error saving global tax config:', e);
       }
     }
     calculate();
     populateAdminControls();
-    showToast('✅ Global FED & WHT rates synced!');
+    showToast(synced ? '✅ Global FED & WHT rates synced!' : (errMsg ? `⚠️ Local only (${errMsg})` : '⚠️ Local only (Sign in online to sync globally)'));
   });
 }
 
@@ -1214,6 +1300,10 @@ async function confirmSaveProduct() {
   }));
 
   const existing = BANK_PRODUCTS.find(p => p.id === pId);
+  const feeType = (existing && existing.feeType) || 'percentage';
+  const tenureRates = (existing && existing.tenureRates && typeof existing.tenureRates === 'object') ? existing.tenureRates : {};
+  const fixedTenures = (existing && Array.isArray(existing.fixedTenures)) ? existing.fixedTenures : [];
+  const liabilityPricingType = (existing && existing.liabilityPricingType) || '';
   const updated = {
     ...(existing || {}),
     id: pId,
@@ -1221,6 +1311,7 @@ async function confirmSaveProduct() {
     category,
     rateType,
     defaultAnnualRate: rate,
+    feeType,
     feePercent: fee,
     defaultFeeValue: fee,
     fedRate: globalConfig.fedRate || 16.0,
@@ -1233,6 +1324,9 @@ async function confirmSaveProduct() {
     collateralDetails,
     rateSlabs,
     feeSlabs,
+    tenureRates,
+    fixedTenures,
+    liabilityPricingType,
     tenures: existing && Array.isArray(existing.tenures) ? existing.tenures : [6, 12, 18, 24, 36]
   };
 
@@ -1241,7 +1335,10 @@ async function confirmSaveProduct() {
   else BANK_PRODUCTS.push(updated);
 
   await withLoading('Saving Product & Slabs...', async () => {
-    if (fb) {
+    await LocalDB.setSetting('cachedProductsJson', JSON.stringify(BANK_PRODUCTS));
+    let cloudSaved = false;
+    let cloudErr = '';
+    if (fb && currentUser && navigator.onLine) {
       try {
         await fb.setDoc('products', pId, {
           id: pId,
@@ -1250,7 +1347,7 @@ async function confirmSaveProduct() {
           rateType,
           defaultAnnualRate: rate,
           defaultFeeValue: fee,
-          feeType: 'percentage',
+          feeType,
           fedRate: globalConfig.fedRate || 16.0,
           minAmount,
           maxAmount,
@@ -1261,9 +1358,14 @@ async function confirmSaveProduct() {
           collateralDetails,
           rateSlabs,
           feeSlabs,
+          tenureRates,
+          fixedTenures,
+          liabilityPricingType,
           updatedAt: fb.serverTimestamp()
         }, true);
+        cloudSaved = true;
       } catch (e) {
+        cloudErr = e.message;
         console.warn('Product save error:', e);
       }
     }
@@ -1272,7 +1374,11 @@ async function confirmSaveProduct() {
     populateProducts(pId);
     calculate();
     renderAdminProductsList();
-    showToast('✅ Product & Slabs saved to Firestore!');
+    if (cloudSaved) {
+      showToast('✅ Product & Slabs saved to Firestore!');
+    } else {
+      showToast(cloudErr ? `⚠️ Saved locally only (${cloudErr})` : '⚠️ Saved locally only. Sign in online to sync to Android.');
+    }
   });
 }
 
@@ -1280,15 +1386,21 @@ async function deleteAdminProduct(productId) {
   if (!confirm('Delete this product from Firestore globally?')) return;
   await withLoading('Deleting Product...', async () => {
     BANK_PRODUCTS = BANK_PRODUCTS.filter(p => p.id !== productId);
-    if (fb) {
+    await LocalDB.setSetting('cachedProductsJson', JSON.stringify(BANK_PRODUCTS));
+    let cloudDeleted = false;
+    let cloudErr = '';
+    if (fb && currentUser && navigator.onLine) {
       try {
         await fb.deleteDoc('products', productId);
-      } catch (e) {}
+        cloudDeleted = true;
+      } catch (e) {
+        cloudErr = e.message;
+      }
     }
     populateProducts();
     calculate();
     renderAdminProductsList();
-    showToast('🗑️ Product deleted.');
+    showToast(cloudDeleted ? '🗑️ Product deleted from Firestore.' : (cloudErr ? `⚠️ Removed locally (${cloudErr})` : '⚠️ Removed locally only (offline/signed out)'));
   });
 }
 
@@ -1486,19 +1598,22 @@ async function confirmBulkImportProductsCsv() {
         if (idx >= 0) BANK_PRODUCTS[idx] = prodObj;
         else BANK_PRODUCTS.push(prodObj);
 
-        if (fb) {
+        if (fb && currentUser && navigator.onLine) {
           await fb.setDoc('products', pId, { ...prodObj, updatedAt: fb.serverTimestamp() }, true);
         }
         importedCount++;
       }
 
+      await LocalDB.setSetting('cachedProductsJson', JSON.stringify(BANK_PRODUCTS));
       closeModal('bulkImportModal');
       const fileInp = document.getElementById('bulkCsvFileInput');
       if (fileInp) fileInp.value = '';
       populateProducts(currentProduct ? currentProduct.id : null);
       calculate();
       renderAdminProductsList();
-      showToast(`✅ Imported ${importedCount} product(s) from CSV & synced!`);
+      showToast((fb && currentUser && navigator.onLine)
+        ? `✅ Imported ${importedCount} product(s) from CSV & synced!`
+        : `⚠️ Imported ${importedCount} product(s) locally only (sign in online to sync).`);
     } catch (e) {
       showToast('❌ CSV Import Error: ' + e.message);
     }
@@ -1584,8 +1699,10 @@ async function toggleUserBlockedStatus(uid) {
   if (!user) return;
   const updated = { ...user, isBlocked: !(user.isBlocked === true), updatedAt: Date.now() };
   await withLoading('Updating User Access...', async () => {
-    await saveUserAccessRecordToFirestore(updated);
-    showToast(updated.isBlocked ? `🚫 Blocked ${updated.officerName}` : `✅ Allowed ${updated.officerName}`);
+    const synced = await saveUserAccessRecordToFirestore(updated);
+    if (synced) {
+      showToast(updated.isBlocked ? `🚫 Blocked ${updated.officerName}` : `✅ Allowed ${updated.officerName}`);
+    }
   });
 }
 
@@ -1623,9 +1740,9 @@ async function confirmSaveUserAccess() {
   };
 
   await withLoading('Syncing User Rights...', async () => {
-    await saveUserAccessRecordToFirestore(userObj);
+    const synced = await saveUserAccessRecordToFirestore(userObj);
     closeModal('editUserAccessModal');
-    showToast('✅ User rights synced to Firestore!');
+    if (synced) showToast('✅ User rights synced to Firestore!');
   });
 }
 
@@ -1635,16 +1752,21 @@ async function saveUserAccessRecordToFirestore(userObj) {
     globalConfig.liveUsersCollectionMap[userObj.uid] = userObj;
   }
   renderAdminUsersList();
-  if (fb) {
-    try {
-      await fb.setDoc('config', 'global', {
-        registeredUsersMap: { [userObj.uid]: userObj },
-        updatedAt: fb.serverTimestamp()
-      }, true);
-      await fb.setDoc('users', userObj.uid, userObj, true);
-    } catch (e) {
-      console.warn('Error syncing user access:', e);
-    }
+  if (!fb || !currentUser || !navigator.onLine) {
+    showToast('⚠️ Updated locally only — sign in online to sync user rights.');
+    return false;
+  }
+  try {
+    await fb.setDoc('config', 'global', {
+      registeredUsersMap: { [userObj.uid]: userObj },
+      updatedAt: fb.serverTimestamp()
+    }, true);
+    await fb.setDoc('users', userObj.uid, userObj, true);
+    return true;
+  } catch (e) {
+    console.warn('Error syncing user access:', e);
+    showToast('❌ Cloud user sync failed: ' + e.message);
+    return false;
   }
 }
 
@@ -1749,25 +1871,49 @@ async function exportAdminFilteredLeadsCsv() {
   });
 }
 
+async function deleteLeadsFromSheetWebhook(leadsToDelete) {
+  const url = typeof getEffectiveWebhookUrl === 'function' ? getEffectiveWebhookUrl() : '';
+  if (!url || !navigator.onLine || !leadsToDelete || leadsToDelete.length === 0) return;
+  const payload = {
+    action: 'delete_leads',
+    deleteIds: leadsToDelete.map(l => l.id).filter(Boolean),
+    mobiles: leadsToDelete.map(l => l.mobile).filter(Boolean)
+  };
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+      mode: 'no-cors'
+    });
+  } catch (e) {
+    console.warn('Sheet delete webhook notice:', e);
+  }
+}
+
 async function adminDeleteSelectedLeads() {
   if (adminSelectedLeadIds.size === 0) {
     showToast('Select at least one lead first.');
     return;
   }
   const ids = Array.from(adminSelectedLeadIds);
-  if (!confirm(`Permanently delete ${ids.length} selected lead(s) from Firestore & local cache?`)) return;
+  if (!confirm(`Permanently delete ${ids.length} selected lead(s) from Firestore, Sheet & local cache?`)) return;
   await withLoading(`Deleting ${ids.length} Lead(s)...`, async () => {
+    const all = await LocalDB.getAllLeads();
+    const targets = all.filter(l => ids.includes(l.id));
+    let cloudErrCount = 0;
     for (const id of ids) {
       await LocalDB.deleteLead(id);
-      if (fb) {
-        try { await fb.deleteDoc('leads', id); } catch (e) {}
+      if (fb && currentUser && navigator.onLine) {
+        try { await fb.deleteDoc('leads', id); } catch (e) { cloudErrCount++; }
       }
     }
+    await deleteLeadsFromSheetWebhook(targets);
     adminSelectedLeadIds.clear();
     await renderLeads();
     await renderAdminLeadsDbList();
     updateSettingsStats();
-    showToast(`🗑️ Deleted ${ids.length} lead(s)`);
+    showToast(cloudErrCount > 0 ? `⚠️ Deleted locally (${cloudErrCount} Cloud delete error)` : `🗑️ Deleted ${ids.length} lead(s)`);
   });
 }
 
@@ -1776,16 +1922,18 @@ async function adminDeleteAllLeads() {
   if (all.length === 0) return;
   if (!confirm(`⚠️ Permanently delete ALL ${all.length} leads from Firestore? This cannot be undone.`)) return;
   await withLoading('Clearing All Leads...', async () => {
+    let cloudErrCount = 0;
     for (const l of all) {
       await LocalDB.deleteLead(l.id);
-      if (fb) {
-        try { await fb.deleteDoc('leads', l.id); } catch (e) {}
+      if (fb && currentUser && navigator.onLine) {
+        try { await fb.deleteDoc('leads', l.id); } catch (e) { cloudErrCount++; }
       }
     }
+    await deleteLeadsFromSheetWebhook(all);
     adminSelectedLeadIds.clear();
     await renderLeads();
     await renderAdminLeadsDbList();
     updateSettingsStats();
-    showToast('🗑️ All leads cleared.');
+    showToast(cloudErrCount > 0 ? `⚠️ Cleared locally (${cloudErrCount} Cloud delete error)` : '🗑️ All leads cleared.');
   });
 }

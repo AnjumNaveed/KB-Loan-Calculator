@@ -1586,14 +1586,14 @@ function doPost(e) {
     if (data.action === "ping") {
       return ContentService.createTextOutput(JSON.stringify({ 
         status: "success", 
-        version: "2.2-dual-key-upsert", 
-        message: "KB App Connected Successfully (Dual-Key In-Place Upsert Active)!" 
+        version: "2.3-dual-key-2way", 
+        message: "KB App Connected Successfully (2-Way Pull/Push Active)!" 
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
     // Handle delete leads action from app by Lead ID or Mobile
     if (data.action === "delete_leads" || data.action === "delete_lead") {
-      var deleteIds = data.leadIds || (data.leadId ? [data.leadId] : []);
+      var deleteIds = data.deleteIds || data.leadIds || (data.leadId ? [data.leadId] : []);
       var deleteMobiles = data.mobiles || (data.mobile ? [data.mobile] : []);
       var cleanDeletePhones = [];
       for (var d = 0; d < deleteMobiles.length; d++) {
@@ -1644,7 +1644,7 @@ function doPost(e) {
       var cleanPhone = cleanDigits(l.mobile);
       var rowData = [
         leadId,
-        l.createdAtFormatted || new Date().toLocaleString(),
+        l.createdAtFormatted || l.timestamp || new Date().toLocaleString(),
         l.customerName || "",
         l.mobile || "",
         l.category || "asset",
@@ -1662,7 +1662,7 @@ function doPost(e) {
         l.notes || "",
         l.approachCount || 1,
         l.locationAddress || "",
-        l.activitiesAudit || ""
+        l.activitiesAudit || l.touchpointLog || ""
       ];
 
       var targetRow = null;
@@ -1691,7 +1691,7 @@ function doPost(e) {
       sheet.getRange(2, 20, updatedLastRow - 1, 1).setWrap(true);
     }
 
-    return ContentService.createTextOutput(JSON.stringify({ status: "success", count: leads.length }))
+    return ContentService.createTextOutput(JSON.stringify({ status: "success", version: "2.3-dual-key-2way", count: leads.length }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() }))
@@ -1701,42 +1701,62 @@ function doPost(e) {
   }
 }
 
+function formatCellDate(val, tz) {
+  if (!val) return "";
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    return Utilities.formatDate(val, tz, "yyyy-MM-dd hh:mm a");
+  }
+  return String(val).trim();
+}
+
+function formatSheetMobile(val) {
+  var s = String(val || "").trim();
+  if (/^3\d{9}$/.test(s)) return "0" + s;
+  return s;
+}
+
 function doGet(e) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Leads") || ss.getActiveSheet();
+  var tz = ss.getSpreadsheetTimeZone() || "Asia/Karachi";
   var lastRow = sheet.getLastRow();
   if (lastRow <= 1) {
-    return ContentService.createTextOutput(JSON.stringify({ status: "success", leads: [] }))
+    return ContentService.createTextOutput(JSON.stringify({ status: "success", version: "2.3-dual-key-2way", leads: [] }))
       .setMimeType(ContentService.MimeType.JSON);
   }
-  var data = sheet.getRange(2, 1, lastRow - 1, 20).getValues();
+  var numCols = Math.max(20, sheet.getLastColumn());
+  var data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
   var leads = [];
   for (var i = 0; i < data.length; i++) {
     var r = data[i];
+    var cust = String(r[2] || "").trim();
+    var mob = formatSheetMobile(r[3]);
+    if (!cust && !mob && !String(r[0] || "").trim()) continue;
+    var rowId = String(r[0] || "").trim() || ("sheet-row-" + (i + 2) + "-" + (cleanDigits(mob) || "lead"));
     leads.push({
-      id: String(r[0]),
-      createdAtFormatted: String(r[1]),
-      customerName: String(r[2]),
-      mobile: String(r[3]),
-      category: String(r[4]),
-      productName: String(r[5]),
+      id: rowId,
+      createdAtFormatted: formatCellDate(r[1], tz),
+      customerName: cust || "Customer",
+      mobile: mob,
+      category: String(r[4] || "asset").trim().toLowerCase() === "liability" ? "liability" : "asset",
+      productName: String(r[5] || ""),
       loanAmount: Number(r[6]) || 0,
       tenureMonths: Number(r[7]) || 0,
       monthlyEmi: Number(r[8]) || 0,
       totalProfit: Number(r[9]) || 0,
       processingFee: Number(r[10]) || 0,
-      status: String(r[11]),
-      followUpDate: String(r[12]),
-      officerName: String(r[13]),
-      officerId: String(r[14]),
-      branchName: String(r[15]),
-      notes: String(r[16]),
+      status: String(r[11] || "New").trim() || "New",
+      followUpDate: formatCellDate(r[12], tz),
+      officerName: String(r[13] || "").trim(),
+      officerId: String(r[14] || "").trim(),
+      branchName: String(r[15] || "").trim(),
+      notes: String(r[16] || ""),
       approachCount: Number(r[17]) || 1,
-      locationAddress: String(r[18]),
-      activitiesAudit: String(r[19])
+      locationAddress: String(r[18] || ""),
+      activitiesAudit: String(r[19] || "")
     });
   }
-  return ContentService.createTextOutput(JSON.stringify({ status: "success", leads: leads }))
+  return ContentService.createTextOutput(JSON.stringify({ status: "success", version: "2.3-dual-key-2way", leads: leads }))
     .setMimeType(ContentService.MimeType.JSON);
 }
     """.trimIndent()
@@ -1747,7 +1767,7 @@ function doGet(e) {
         Row(verticalAlignment = Alignment.CenterVertically) {
           Icon(Icons.Default.Code, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(20.dp))
           Spacer(modifier = Modifier.width(8.dp))
-          Text("Google Apps Script Setup (v2.2 In-Place Upsert)", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+          Text("Google Apps Script Setup (v2.3 2-Way Pull & Upsert)", fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
       },
       text = {
