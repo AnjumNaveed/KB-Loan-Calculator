@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>KBL Loan Calculator & CRM</title>
-  <meta name="description" content="KBL Bank Loan & Deposit Calculator with Lead CRM, Interactive Amortization, Google Sign-In, and Real-Time Firestore Sync">
+  <title>KB Loan Calculator</title>
+  <meta name="description" content="KB Loan Calculator with Lead CRM, Interactive Amortization, Google Sign-In, and Real-Time Firestore Sync">
 
   <!-- PWA & Apple Mobile Web App Metas -->
   <link rel="manifest" href="./manifest.json">
   <meta name="theme-color" content="#1E3A8A">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="KBL Calc">
+  <meta name="apple-mobile-web-app-title" content="KB Calc">
   <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
   <link rel="apple-touch-icon" href="./icon-192.png">
 
@@ -28,16 +28,99 @@
   <script>
     window.clearAppCacheAndReload = async function () {
       try {
-        if ('serviceWorker' in navigator) {
-          const regs = await navigator.serviceWorker.getRegistrations();
-          await Promise.all(regs.map(r => r.unregister()));
-        }
-        if ('caches' in window) {
-          const keys = await caches.keys();
-          await Promise.all(keys.map(k => caches.delete(k)));
-        }
+        var ov = document.getElementById('globalLoadingOverlay');
+        var txt = document.getElementById('globalLoadingText');
+        if (txt) txt.textContent = 'Resetting Cache & Syncing...';
+        if (ov) ov.classList.add('active');
       } catch (e) {}
-      window.location.reload();
+
+      const cleanupTask = (async () => {
+        let unsyncedLeads = [];
+        try {
+          const rawLs = window.localStorage.getItem('kbl_pwa_leads_list');
+          if (rawLs) {
+            const parsed = JSON.parse(rawLs);
+            if (Array.isArray(parsed)) {
+              unsyncedLeads = parsed.filter(l => l && l.syncStatus !== 'synced');
+            }
+          }
+        } catch (e) {}
+
+        try {
+          if (typeof indexedDB !== 'undefined') {
+            await new Promise((resolve) => {
+              let done = false;
+              const finish = () => { if (!done) { done = true; resolve(); } };
+              setTimeout(finish, 1200);
+              const req = indexedDB.open('KBCalculatorDB', 2);
+              req.onsuccess = (ev) => {
+                try {
+                  const db = ev.target.result;
+                  if (db.objectStoreNames.contains('leads')) {
+                    const tx = db.transaction(['leads', ...(db.objectStoreNames.contains('settings') ? ['settings'] : [])], 'readwrite');
+                    const lStore = tx.objectStore('leads');
+                    const allReq = lStore.getAll();
+                    allReq.onsuccess = () => {
+                      const rows = Array.isArray(allReq.result) ? allReq.result : [];
+                      const map = new Map();
+                      unsyncedLeads.forEach(l => map.set(l.id, l));
+                      rows.forEach(l => {
+                        if (l && l.syncStatus !== 'synced') map.set(l.id, l);
+                      });
+                      unsyncedLeads = Array.from(map.values());
+                      lStore.clear();
+                      unsyncedLeads.forEach(l => lStore.put(l));
+                    };
+                    if (db.objectStoreNames.contains('settings')) {
+                      tx.objectStore('settings').delete('cachedProductsJson');
+                    }
+                    tx.oncomplete = finish;
+                    tx.onerror = finish;
+                  } else {
+                    finish();
+                  }
+                } catch (err) { finish(); }
+              };
+              req.onerror = finish;
+              req.onblocked = finish;
+            });
+          }
+        } catch (e) {}
+
+        try {
+          window.localStorage.setItem('kbl_pwa_leads_list', JSON.stringify(unsyncedLeads));
+          window.localStorage.removeItem('kbl_pwa_setting_cachedProductsJson');
+        } catch (e) {}
+
+        try {
+          if ('serviceWorker' in navigator) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(r => r.unregister().catch(() => {})));
+          }
+        } catch (e) {}
+
+        try {
+          if ('caches' in window) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map(k => caches.delete(k).catch(() => {})));
+          }
+        } catch (e) {}
+      })();
+
+      try {
+        await Promise.race([
+          cleanupTask,
+          new Promise(resolve => setTimeout(resolve, 2600))
+        ]);
+      } catch (e) {}
+
+      try {
+        const nextUrl = new URL(window.location.href);
+        nextUrl.searchParams.set('reset', String(Date.now()));
+        window.location.replace(nextUrl.toString());
+      } catch (e) {
+        window.location.reload();
+      }
     };
     window.addEventListener('error', function (ev) {
       if (ev && ev.message && (ev.message.includes('ResizeObserver') || ev.message.includes('Script error'))) return;
@@ -92,8 +175,8 @@
             <path d="M4 10h3v7H4zM10.5 10h3v7h-3zM2 22h20v-3H2v3zm15-12h3v7h-3zM12 1L2 6v2h20V6L12 1z"/>
           </svg>
           <div>
-            <span>KBL Loan Calculator</span>
-            <span class="brand-subtitle">Enterprise Financing, Deposits & Branch CRM</span>
+            <span>KB Loan Calculator</span>
+            <span class="brand-subtitle">Enterprise Financing, Deposits &amp; Branch CRM</span>
           </div>
         </div>
 
@@ -130,7 +213,7 @@
 
     <!-- iOS / Android Home Screen / App Drawer Install Banner -->
     <div class="install-banner" id="pwaBanner">
-      <span id="pwaBannerText">📲 Install KBL App on Home Screen / App Drawer</span>
+      <span id="pwaBannerText">📲 Install KB Loan Calculator on Home Screen / App Drawer</span>
       <button type="button" id="pwaInstallBtn" onclick="triggerPwaInstall()">📲 Install App</button>
     </div>
 
@@ -837,12 +920,11 @@
             <strong id="statLastSyncTime">Checking...</strong>
           </div>
           <p style="font-size: 0.74rem; color: var(--text-muted); margin-top: 6px;">
-            یہ سیکشن صرف آپ کی اپنی ذاتی لیڈز کا بیک اپ رکھتا ہے (کسی دوسرے آفیسر یا برانچ کا ڈیٹا اس میں شامل نہیں ہوتا)۔
+            یہ سیکشن صرف آپ کی ذاتی اور مجاز برانچ کی لیڈز کی کیشے محفوظ رکھتا ہے (ری سیٹ کرنے سے غیر سنک شدہ لیڈز محفوظ رہتی ہیں اور باقی ڈیٹا دوبارہ فریش سنک ہوتا ہے)۔
           </p>
           <div class="btn-group">
-            <button type="button" class="btn btn-outline" onclick="exportLeadsJson()">📥 Backup My Leads (JSON)</button>
             <button type="button" class="btn btn-success" onclick="manualSync()">🔄 Sync Now</button>
-            <button type="button" class="btn btn-outline" onclick="clearAppCacheAndReload()" title="Use if mobile browser shows stale screen">🧹 Reset Cache</button>
+            <button type="button" class="btn btn-outline" onclick="clearAppCacheAndReload()" title="Clear app & synced cache while preserving unsynced leads">🧹 Reset Cache</button>
           </div>
         </div>
       </div>
@@ -1306,7 +1388,7 @@
     <div class="modal-overlay" id="googleSignInModal">
       <div class="modal-dialog">
         <div class="modal-header">
-          <div class="modal-title">🔑 Sign In to KBL loan calculator</div>
+          <div class="modal-title">🔑 Sign In to KB Loan Calculator</div>
           <button type="button" class="modal-close" onclick="closeModal('googleSignInModal')">&times;</button>
         </div>
         <div class="modal-body" style="font-size: 0.86rem; line-height: 1.5; text-align: center;">
@@ -1379,6 +1461,8 @@
       arrayUnion,
       arrayRemove,
       onSnapshot,
+      query,
+      where,
       serverTimestamp
     } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
@@ -1434,12 +1518,22 @@
         signOut: () => signOut(auth),
         getDoc: (colName, docId) => getDoc(doc(db, colName, docId)),
         getDocs: (colName) => getDocs(collection(db, colName)),
+        queryCollection: (colName, constraints = []) => {
+          const colRef = collection(db, colName);
+          const qConstraints = constraints.map(c => where(c.field, c.op, c.value));
+          return getDocs(qConstraints.length > 0 ? query(colRef, ...qConstraints) : colRef);
+        },
         setDoc: (colName, docId, data, merge = true) => setDoc(doc(db, colName, docId), data, { merge }),
         deleteDoc: (colName, docId) => deleteDoc(doc(db, colName, docId)),
         deleteField: () => deleteField(),
         arrayUnion: (...items) => arrayUnion(...items),
         arrayRemove: (...items) => arrayRemove(...items),
         onCollectionSnapshot: (colName, onNext, onErr) => onSnapshot(collection(db, colName), onNext, onErr),
+        onQuerySnapshot: (colName, constraints = [], onNext, onErr) => {
+          const colRef = collection(db, colName);
+          const qConstraints = constraints.map(c => where(c.field, c.op, c.value));
+          return onSnapshot(qConstraints.length > 0 ? query(colRef, ...qConstraints) : colRef, onNext, onErr);
+        },
         onDocSnapshot: (colName, docId, onNext, onErr) => onSnapshot(doc(db, colName, docId), onNext, onErr),
         serverTimestamp: () => serverTimestamp()
       };

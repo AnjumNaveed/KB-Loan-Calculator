@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "KBL Loan Calculator & CRM",
-  "short_name": "KBL Calc",
+  "name": "KB Loan Calculator",
+  "short_name": "KB Calc",
   "description": "Bank Loan & Deposit Calculator with Lead CRM, Interactive Amortization, GPS Maps, and Google Sheets Offline Sync",
   "start_url": "./index.html",
   "scope": "./",

@@ -1,10 +1,10 @@
 /**
- * KBL Loan Calculator - Leads Analytics, Branch Supervisor Monitoring & 9-Card Admin Console
+ * KB Loan Calculator - Leads Analytics, Branch Supervisor Monitoring & 9-Card Admin Console
  * Complete parity with Android LeadsScreen.kt and AdminScreen.kt
  */
 
 let adminUnlocked = false;
-let expandedLeadIds = new Set();
+let expandedLeadId = null;
 let adminSelectedLeadIds = new Set();
 let adminProdFilterCat = 'all';
 let myBranchFilterActive = false;
@@ -352,9 +352,14 @@ function getFilteredAuthorizedLeads(allLeads) {
   }
 
   // Personal-First Default: Always show ONLY officer's own leads until a Branch Filter is entered
+  const allowedTokens = effAllowed.split(/[,;|]/).map(s => s.trim()).filter(Boolean);
+  const isLeadAllowedForBranchRights = (leadBranch) =>
+    hasAllRights || allowedTokens.some(tok => isBranchAuthorizedForQuery(tok, leadBranch));
+
   const scopeLeads = allLeads.filter(l => {
     const effBranch = resolveLeadEffectiveBranch(l);
     if (supQuery && canFilter) {
+      if (!isLeadAllowedForBranchRights(effBranch)) return false;
       if (hasAllRights && supQuery.trim().toUpperCase() === 'ALL') return true;
       return isBranchAuthorizedForQuery(supQuery, effBranch);
     }
@@ -530,9 +535,9 @@ async function renderLeads() {
   const countSpan = document.getElementById('leadsCount');
   const { leads: filtered, authorizedScopeLeads, scopeLabel } = getFilteredAuthorizedLeads(allLeads);
 
-  if (countSpan) countSpan.textContent = authorizedScopeLeads.length;
+  if (countSpan) countSpan.textContent = filtered.length;
 
-  // Update KPI Analytics Dashboard dynamically on filtered leads
+  // Update KPI Analytics Dashboard dynamically on active filtered leads
   const kpiLeads = filtered;
   const total = kpiLeads.length;
   const convertedList = kpiLeads.filter(l => (l.status || 'New') === 'Converted');
@@ -595,7 +600,7 @@ async function renderLeads() {
   const statuses = ['New', 'Contacted', 'Follow-Up', 'Converted', 'Lost'];
 
   container.innerHTML = filtered.map(lead => {
-    const isExpanded = expandedLeadIds.has(lead.id);
+    const isExpanded = expandedLeadId === lead.id;
     const cleanNote = cleanRawActionPayload(lead.notes || '');
     const badgeClass = 'badge-' + (lead.status || 'new').toLowerCase().replace(/[^a-z]/g, '');
     const effBranch = resolveLeadEffectiveBranch(lead) || 'Unassigned';
@@ -607,13 +612,7 @@ async function renderLeads() {
     const rawOff = lead.officerName || 'RO';
     const dispOff = typeof toTitleCase === 'function' ? toTitleCase(rawOff) : rawOff;
     const avatarInitial = (dispCust.trim().charAt(0) || 'C').toUpperCase();
-    const activities = Array.isArray(lead.activities)
-      ? lead.activities.slice().sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
-      : [];
-    const approachesCount = Number(lead.approachCount) || Math.max(1, activities.length);
-    const notesCount = Number(lead.notesUpdateCount) || activities.filter(a => a.actionType === 'note_update').length;
     const followUpDue = isFollowUpDueAlert(lead);
-    const inlineActivitiesHtml = activities.slice(0, 4).map(renderActivityTimelineCardHtml).join('');
 
     return `
       <div class="lead-card ${isExpanded ? 'expanded' : ''}" id="lead-card-${lead.id}">
@@ -624,11 +623,9 @@ async function renderLeads() {
               <span class="lead-name">${escapeHtml(dispCust)}</span>
               <span class="lead-cat-pill ${isLiab ? 'liability' : 'asset'}">${isLiab ? 'Deposit' : 'Loan'}</span>
             </div>
-            <div class="lead-phone">
-              📞 ${escapeHtml(lead.mobile || 'N/A')} • ${escapeHtml(lead.productName)} • <strong>PKR ${formatPKR(lead.loanAmount)}</strong> (${lead.tenureMonths}M)
-            </div>
-            <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 3px;">
-              👤 Leading: ${escapeHtml(dispOff)} (${escapeHtml(lead.officerId || 'RO')}) • 🏢 ${escapeHtml(effBranch)}${gpsInfo.hasCoords ? ' • 📍 GPS' : ''}
+            <div class="lead-phone">📞 ${escapeHtml(lead.mobile || 'N/A')}</div>
+            <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">
+              👤 ${escapeHtml(dispOff)}${lead.officerId ? ` (${escapeHtml(lead.officerId)})` : ''}
             </div>
             ${followUpDue ? `<div class="lead-followup-alert">⏰ Follow-Up Due: ${escapeHtml(lead.followUpDate)}</div>` : ''}
           </div>
@@ -639,10 +636,13 @@ async function renderLeads() {
         </button>
 
         <div class="lead-details-body">
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 6px 12px; font-size: 0.78rem; margin-bottom: 8px; background: var(--surface-subtle); padding: 9px 10px; border-radius: 8px;">
+          <div class="lead-details-grid">
+            <div><strong>Facility:</strong> ${escapeHtml(lead.productName || 'Bank Facility')}</div>
+            <div><strong>${isLiab ? 'Deposit' : 'Loan'} Amount:</strong> PKR ${formatPKR(lead.loanAmount)} (${lead.tenureMonths || 0}M)</div>
             <div><strong>Monthly EMI / Profit:</strong> PKR ${formatPKR(lead.monthlyEmi)}</div>
             <div><strong>Total Profit:</strong> PKR ${formatPKR(lead.totalProfit)}</div>
             <div><strong>Processing Fee:</strong> PKR ${formatPKR(lead.processingFee)}</div>
+            <div><strong>Branch:</strong> ${escapeHtml(effBranch)}</div>
             <div><strong>Created:</strong> ${formatDate(lead.createdAt)}</div>
             ${lead.dob ? `<div><strong>DOB / Age:</strong> ${escapeHtml(lead.dob)} (${lead.age || 0} Yrs)</div>` : ''}
             ${lead.monthlyIncome ? `<div><strong>Income / DBR:</strong> PKR ${formatPKR(lead.monthlyIncome)} (${lead.dbrAllowed || 50}%)</div>` : ''}
@@ -656,28 +656,8 @@ async function renderLeads() {
           </div>
           ${cleanNote ? `<div class="lead-notes-box">📝 <strong>Note:</strong> ${escapeHtml(cleanNote)}</div>` : ''}
 
-          <!-- Approach & Audit History Banner (Android Parity) -->
-          <div class="audit-stats-banner">
-            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-              <strong style="font-size: 0.78rem; color: var(--primary);">📊 Approach &amp; Audit History</strong>
-              <button type="button" class="btn btn-outline btn-sm" style="width: auto; min-height: 26px; height: 26px; font-size: 0.7rem; padding: 0 8px;" onclick="openTrackRecord('${lead.id}')">View All (${activities.length})</button>
-            </div>
-            <div class="audit-stats-grid">
-              <div class="audit-stat-pill">
-                <span class="audit-stat-label">Approaches</span>
-                <span class="audit-stat-val tabular-nums">${approachesCount} Time${approachesCount === 1 ? '' : 's'}</span>
-              </div>
-              <div class="audit-stat-pill">
-                <span class="audit-stat-label">Note Updates</span>
-                <span class="audit-stat-val tabular-nums">${notesCount} Time${notesCount === 1 ? '' : 's'}</span>
-              </div>
-            </div>
-          </div>
-
-          ${activities.length > 0 ? `<div class="timeline-list">${inlineActivitiesHtml}</div>` : ''}
-
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
-            <label style="font-size: 0.76rem; font-weight: 700; color: var(--text-muted);">Update Pipeline Status:</label>
+          <div class="lead-status-row">
+            <label style="font-size: 0.76rem; font-weight: 800; color: var(--primary);">Pipeline Status:</label>
             <select class="form-select" style="height: 34px; font-size: 0.78rem; width: auto; min-width: 150px; font-weight: 700;" onchange="updateLeadStatus('${lead.id}', this.value)">
               ${statuses.map(s => `<option value="${s}" ${(lead.status || 'New') === s ? 'selected' : ''}>${s}</option>`).join('')}
             </select>
@@ -687,7 +667,7 @@ async function renderLeads() {
             <button type="button" class="btn btn-call" onclick="initiateCall('${lead.id}', '${escapeHtml(lead.mobile)}')">📞 Call</button>
             <button type="button" class="btn btn-whatsapp" onclick="sendQuotationWhatsApp('${lead.id}')">💬 WhatsApp</button>
             <button type="button" class="btn btn-sms" onclick="sendQuotationSMS('${lead.id}')">✉️ SMS</button>
-            <button type="button" class="btn btn-outline" onclick="openTrackRecord('${lead.id}')">📜 History (${activities.length})</button>
+            <button type="button" class="btn btn-primary" onclick="openTrackRecord('${lead.id}')">📜 View Track Record</button>
             <button type="button" class="btn btn-outline" onclick="openEditNoteModal('${lead.id}')">📝 Note</button>
             <button type="button" class="btn btn-outline" onclick="openFollowUpModal('${lead.id}')">📅 Follow-Up</button>
           </div>
@@ -698,13 +678,33 @@ async function renderLeads() {
 }
 
 function toggleLeadCardExpand(leadId) {
-  if (expandedLeadIds.has(leadId)) expandedLeadIds.delete(leadId);
-  else expandedLeadIds.add(leadId);
+  const prevId = expandedLeadId;
+  if (prevId === leadId) {
+    expandedLeadId = null;
+    const el = document.getElementById(`lead-card-${leadId}`);
+    if (el) {
+      el.classList.remove('expanded');
+      const chev = el.querySelector('.admin-chevron');
+      if (chev) chev.textContent = 'Expand ▾';
+    }
+    return;
+  }
+
+  if (prevId) {
+    const prevEl = document.getElementById(`lead-card-${prevId}`);
+    if (prevEl) {
+      prevEl.classList.remove('expanded');
+      const prevChev = prevEl.querySelector('.admin-chevron');
+      if (prevChev) prevChev.textContent = 'Expand ▾';
+    }
+  }
+
+  expandedLeadId = leadId;
   const el = document.getElementById(`lead-card-${leadId}`);
   if (el) {
-    el.classList.toggle('expanded');
+    el.classList.add('expanded');
     const chev = el.querySelector('.admin-chevron');
-    if (chev) chev.textContent = el.classList.contains('expanded') ? 'Fold ▴' : 'Expand ▾';
+    if (chev) chev.textContent = 'Fold ▴';
   }
 }
 

@@ -29,6 +29,10 @@ let loadingDismissTimer = null;
 let loadingFailSafeTimer = null;
 let isSyncingNow = false;
 let hasPulledSheetOnAuth = false;
+let currentLeadsScopeKey = '';
+let scopedLeadBuckets = new Map();
+let scopedBucketReady = new Set();
+let expectedScopedBuckets = new Set();
 
 let globalConfig = {
   fedRate: 16.0,
@@ -463,7 +467,7 @@ window.addEventListener('beforeinstallprompt', (e) => {
 window.addEventListener('appinstalled', () => {
   deferredInstallPrompt = null;
   updatePwaBannerState();
-  showToast('📲 KBL Loan Calculator installed as App!');
+  showToast('📲 KB Loan Calculator installed as App!');
 });
 
 function updatePwaBannerState() {
@@ -478,10 +482,10 @@ function updatePwaBannerState() {
   }
   banner.style.display = 'flex';
   if (deferredInstallPrompt) {
-    if (txt) txt.textContent = '📲 Install KBL Loan Calculator directly to your App Drawer';
+    if (txt) txt.textContent = '📲 Install KB Loan Calculator directly to your App Drawer';
     if (btn) btn.textContent = '📲 Install App';
   } else {
-    if (txt) txt.textContent = '📲 Add KBL App to Home Screen / App Drawer';
+    if (txt) txt.textContent = '📲 Add KB Loan Calculator to Home Screen / App Drawer';
     if (btn) btn.textContent = '📲 Install App';
   }
 }
@@ -494,7 +498,7 @@ async function triggerPwaInstall() {
       if (choice && choice.outcome === 'accepted') {
         deferredInstallPrompt = null;
         updatePwaBannerState();
-        showToast('✅ Installing KBL App...');
+        showToast('✅ Installing KB Loan Calculator...');
         return;
       }
     } catch (e) {
@@ -506,6 +510,14 @@ async function triggerPwaInstall() {
 
 window.addEventListener('DOMContentLoaded', async () => {
   window.__kblAppBooted = true;
+  if (window.location.search && window.location.search.includes('reset=')) {
+    try {
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete('reset');
+      window.history.replaceState({}, document.title, cleanUrl.pathname + cleanUrl.search + cleanUrl.hash);
+      setTimeout(() => showToast('✅ Cache reset complete — syncing fresh data!'), 450);
+    } catch (e) {}
+  }
   try {
     const savedTheme = await LocalDB.getSetting('themeMode', 'light');
     applyThemeMode(savedTheme);
@@ -619,7 +631,7 @@ function initFirebaseAuthAndFirestore() {
       }
       closeModal('googleSignInModal');
 
-      // Attach all real-time listeners concurrently without blocking on profile verification
+      // Attach real-time listeners concurrently
       startFirestoreGlobalConfigListener(user);
       startFirestoreUserListener(user);
       startFirestoreUsersCollectionListener(user);
@@ -657,6 +669,7 @@ function initFirebaseAuthAndFirestore() {
 
       if (unsubscribeProducts) { unsubscribeProducts(); unsubscribeProducts = null; }
       if (unsubscribeLeads) { unsubscribeLeads(); unsubscribeLeads = null; }
+      currentLeadsScopeKey = '';
       if (unsubscribeGlobalConfig) { unsubscribeGlobalConfig(); unsubscribeGlobalConfig = null; }
       if (unsubscribeUserDoc) { unsubscribeUserDoc(); unsubscribeUserDoc = null; }
       if (unsubscribeUsersCol) { unsubscribeUsersCol(); unsubscribeUsersCol = null; }
@@ -955,6 +968,13 @@ async function verifyUserAccessAndSyncProfile(user, fetchFresh = false) {
     }
 
     openOnboardingModalIfNeeded(user);
+
+    // Re-bind scoped Firestore leads listener if user's branch/role/staffId changed
+    if (getCurrentLeadsScopeKey() !== currentLeadsScopeKey) {
+      startFirestoreLeadsListener();
+    } else {
+      await pruneOutOfScopeCachedLeads();
+    }
 
     await renderLeads();
     updateSettingsStats();
@@ -1282,91 +1302,242 @@ function startFirestoreProductsListener() {
   });
 }
 
-// 8. REAL-TIME FIRESTORE LEADS SYNCHRONIZATION
-function startFirestoreLeadsListener() {
-  if (!fb) return;
-  if (unsubscribeLeads) unsubscribeLeads();
+// 8. SCOPED REAL-TIME FIRESTORE LEADS SYNCHRONIZATION (Authorized Branch & Own Leads Only)
+function isUserAllBranchesAdmin() {
+  if (typeof isPrimaryAdminUser === 'function' && isPrimaryAdminUser()) return true;
+  if (currentUserProfile && currentUserProfile.role === 'Admin') return true;
+  const effAllowed = typeof getEffectiveAllowedBranch === 'function' ? getEffectiveAllowedBranch() : '';
+  const tokens = effAllowed.split(/[,;|]/).map(s => s.trim()).filter(Boolean);
+  return tokens.some(t => t.toUpperCase() === 'ALL' || t === '*');
+}
 
-  unsubscribeLeads = fb.onCollectionSnapshot('leads', async (snapshot) => {
-    try {
-      const localLeads = await LocalDB.getAllLeads();
-      const localMap = new Map(localLeads.map(l => [l.id, l]));
-      const remoteIds = new Set();
+function buildBranchQueryVariations(effAllowed) {
+  if (!effAllowed) return [];
+  const tokens = effAllowed.split(/[,;|]/).map(s => s.trim()).filter(Boolean);
+  const set = new Set();
+  tokens.forEach(tok => {
+    const raw = tok.trim();
+    if (!raw || raw.toUpperCase() === 'ALL' || raw === '*') return;
+    set.add(raw);
+    const noBranch = raw.replace(/\s*\bbranch\b\s*/gi, ' ').replace(/\s+/g, ' ').trim();
+    const titleRaw = typeof toTitleCase === 'function' ? toTitleCase(raw) : raw;
+    set.add(titleRaw);
+    set.add(raw.toLowerCase());
+    set.add(raw.toUpperCase());
+    if (noBranch) {
+      const titleShort = typeof toTitleCase === 'function' ? toTitleCase(noBranch) : noBranch;
+      set.add(noBranch);
+      set.add(titleShort);
+      set.add(noBranch.toLowerCase());
+      set.add(noBranch.toUpperCase());
+      set.add(`${titleShort} Branch`);
+      set.add(`${noBranch} Branch`);
+      set.add(`${noBranch.toLowerCase()} branch`);
+    }
+  });
+  return Array.from(set).filter(Boolean);
+}
 
-      for (const docSnap of snapshot.docs) {
-        const d = docSnap.data();
-        const leadId = d.id || docSnap.id;
-        remoteIds.add(leadId);
-        const existing = localMap.get(leadId);
+function getCurrentLeadsScopeKey() {
+  const uid = currentUser ? currentUser.uid : '';
+  const staff = (officerProfile.staffId || '').trim().toUpperCase();
+  const canFilter = typeof canCurrentUserUseSupervisorFilter === 'function' ? canCurrentUserUseSupervisorFilter() : true;
+  const effAllowed = typeof getEffectiveAllowedBranch === 'function' ? getEffectiveAllowedBranch() : '';
+  const isAll = isUserAllBranchesAdmin();
+  return `${uid}|${staff}|${canFilter}|${effAllowed}|${isAll}`;
+}
 
-        const remoteUpdatedMs = Number(d.updatedAtMs) || Number(d.createdAt) || 0;
-        const localUpdatedMs = existing ? (Number(existing.updatedAtMs) || Number(existing.createdAt) || 0) : 0;
-        if (existing && existing.syncStatus === 'pending_sync' && localUpdatedMs > remoteUpdatedMs) {
-          continue;
-        }
+function isLeadInAuthorizedScope(lead) {
+  if (!currentUser) return true;
+  if (isUserAllBranchesAdmin()) return true;
+  if (typeof isLeadOwnedByCurrentOfficer === 'function' && isLeadOwnedByCurrentOfficer(lead)) return true;
+  const canFilter = typeof canCurrentUserUseSupervisorFilter === 'function' ? canCurrentUserUseSupervisorFilter() : true;
+  if (!canFilter) return false;
+  const effAllowed = typeof getEffectiveAllowedBranch === 'function' ? getEffectiveAllowedBranch() : '';
+  if (!effAllowed) return false;
+  const tokens = effAllowed.split(/[,;|]/).map(s => s.trim()).filter(Boolean);
+  const leadBranch = typeof resolveLeadEffectiveBranch === 'function' ? resolveLeadEffectiveBranch(lead) : (lead.branchName || '');
+  return tokens.some(tok => typeof isBranchAuthorizedForQuery === 'function' && isBranchAuthorizedForQuery(tok, leadBranch));
+}
 
-        const remoteLead = {
-          id: leadId,
-          customerName: d.customerName || 'Customer',
-          mobile: d.mobile || '',
-          dob: d.dob || '',
-          age: Number(d.age) || 0,
-          monthlyIncome: Number(d.monthlyIncome) || 0,
-          dbrAllowed: Number(d.dbrAllowed) || 50,
-          category: d.category || 'asset',
-          productId: d.productId || '',
-          productName: d.productName || 'Bank Facility',
-          loanAmount: Number(d.loanAmount) || 0,
-          tenureMonths: Number(d.tenureMonths) || 12,
-          monthlyEmi: Number(d.monthlyEmi) || 0,
-          totalProfit: Number(d.totalProfit) || 0,
-          processingFee: Number(d.processingFee) || 0,
-          isFiler: d.isFiler !== false,
-          taxRate: Number(d.taxRate) || 0,
-          taxDeducted: Number(d.taxDeducted) || 0,
-          netProfit: Number(d.netProfit) || 0,
-          status: d.status || 'New',
-          notes: cleanRawActionPayload(d.notes || ''),
-          followUpDate: d.followUpDate || '',
-          officerName: d.officerName || '',
-          officerId: d.officerId || '',
-          branchName: d.branchName || '',
-          userId: d.userId || '',
-          latitude: d.latitude ?? null,
-          longitude: d.longitude ?? null,
-          locationAddress: d.locationAddress || '',
-          locationCapturedAt: Number(d.locationCapturedAt) || 0,
-          createdAt: Number(d.createdAt) || Date.now(),
-          updatedAtMs: remoteUpdatedMs || Date.now(),
-          syncStatus: 'synced',
-          sheetsSynced: d.sheetsSynced === true || (existing ? Boolean(existing.sheetsSynced) : false),
-          approachCount: Number(d.approachCount) || (Array.isArray(d.activities) ? d.activities.length : 1),
-          notesUpdateCount: Number(d.notesUpdateCount) || (Array.isArray(d.activities) ? d.activities.filter(a => a.actionType === 'note_update').length : 0),
-          activities: Array.isArray(d.activities) ? d.activities : (existing ? existing.activities : [])
-        };
+function mapRemoteDocToLead(docSnap, existing) {
+  const d = docSnap.data();
+  const leadId = d.id || docSnap.id;
+  const remoteUpdatedMs = Number(d.updatedAtMs) || Number(d.createdAt) || 0;
+  return {
+    id: leadId,
+    customerName: d.customerName || 'Customer',
+    mobile: d.mobile || '',
+    dob: d.dob || '',
+    age: Number(d.age) || 0,
+    monthlyIncome: Number(d.monthlyIncome) || 0,
+    dbrAllowed: Number(d.dbrAllowed) || 50,
+    category: d.category || 'asset',
+    productId: d.productId || '',
+    productName: d.productName || 'Bank Facility',
+    loanAmount: Number(d.loanAmount) || 0,
+    tenureMonths: Number(d.tenureMonths) || 12,
+    monthlyEmi: Number(d.monthlyEmi) || 0,
+    totalProfit: Number(d.totalProfit) || 0,
+    processingFee: Number(d.processingFee) || 0,
+    isFiler: d.isFiler !== false,
+    taxRate: Number(d.taxRate) || 0,
+    taxDeducted: Number(d.taxDeducted) || 0,
+    netProfit: Number(d.netProfit) || 0,
+    status: d.status || 'New',
+    notes: cleanRawActionPayload(d.notes || ''),
+    followUpDate: d.followUpDate || '',
+    officerName: d.officerName || '',
+    officerId: d.officerId || '',
+    branchName: d.branchName || '',
+    userId: d.userId || '',
+    latitude: d.latitude ?? null,
+    longitude: d.longitude ?? null,
+    locationAddress: d.locationAddress || '',
+    locationCapturedAt: Number(d.locationCapturedAt) || 0,
+    createdAt: Number(d.createdAt) || Date.now(),
+    updatedAtMs: remoteUpdatedMs || Date.now(),
+    syncStatus: 'synced',
+    sheetsSynced: d.sheetsSynced === true || (existing ? Boolean(existing.sheetsSynced) : false),
+    approachCount: Number(d.approachCount) || (Array.isArray(d.activities) ? d.activities.length : 1),
+    notesUpdateCount: Number(d.notesUpdateCount) || (Array.isArray(d.activities) ? d.activities.filter(a => a.actionType === 'note_update').length : 0),
+    activities: Array.isArray(d.activities) ? d.activities : (existing ? existing.activities : [])
+  };
+}
 
-        await LocalDB.saveLead(remoteLead);
-        localMap.set(leadId, remoteLead);
+async function pruneOutOfScopeCachedLeads() {
+  if (!currentUser || isUserAllBranchesAdmin()) return;
+  const localLeads = await LocalDB.getAllLeads();
+  let removed = 0;
+  for (const local of localLeads) {
+    if (local.syncStatus === 'synced' && !isLeadInAuthorizedScope(local)) {
+      await LocalDB.deleteLead(local.id);
+      removed++;
+    }
+  }
+  if (removed > 0) {
+    await renderLeads();
+    await updateSettingsStats();
+  }
+}
+
+function buildScopedFirestorePlans() {
+  if (!currentUser) return [];
+  if (isUserAllBranchesAdmin() || !fb || typeof fb.onQuerySnapshot !== 'function') {
+    return [{ id: 'all', constraints: [] }];
+  }
+  const plans = [
+    { id: 'own_uid', constraints: [{ field: 'userId', op: '==', value: currentUser.uid }] }
+  ];
+  const staff = (officerProfile.staffId || '').trim();
+  if (staff) {
+    plans.push({ id: 'own_staff', constraints: [{ field: 'officerId', op: '==', value: staff }] });
+  }
+  const canFilter = typeof canCurrentUserUseSupervisorFilter === 'function' ? canCurrentUserUseSupervisorFilter() : true;
+  if (canFilter) {
+    const effAllowed = typeof getEffectiveAllowedBranch === 'function' ? getEffectiveAllowedBranch() : '';
+    const variations = buildBranchQueryVariations(effAllowed);
+    for (let i = 0; i < variations.length; i += 10) {
+      const chunk = variations.slice(i, i + 10);
+      if (chunk.length > 0) {
+        plans.push({
+          id: `branch_${Math.floor(i / 10)}`,
+          constraints: [{ field: 'branchName', op: 'in', value: chunk }]
+        });
       }
+    }
+  }
+  return plans;
+}
 
+async function flushScopedBucketsToLocalDB() {
+  try {
+    const localLeads = await LocalDB.getAllLeads();
+    const localMap = new Map(localLeads.map(l => [l.id, l]));
+    const mergedMap = new Map();
+
+    for (const bucketMap of scopedLeadBuckets.values()) {
+      for (const [leadId, docSnap] of bucketMap.entries()) {
+        const prev = mergedMap.get(leadId);
+        const existing = localMap.get(leadId);
+        const candidate = mapRemoteDocToLead(docSnap, existing);
+        if (!isLeadInAuthorizedScope(candidate)) continue;
+        if (!prev || candidate.updatedAtMs >= prev.updatedAtMs) {
+          mergedMap.set(leadId, candidate);
+        }
+      }
+    }
+
+    for (const [leadId, remoteLead] of mergedMap.entries()) {
+      const existing = localMap.get(leadId);
+      const localUpdatedMs = existing ? (Number(existing.updatedAtMs) || Number(existing.createdAt) || 0) : 0;
+      if (existing && existing.syncStatus === 'pending_sync' && localUpdatedMs > remoteLead.updatedAtMs) {
+        continue;
+      }
+      await LocalDB.saveLead(remoteLead);
+      localMap.set(leadId, remoteLead);
+    }
+
+    const allBucketsReady = expectedScopedBuckets.size > 0 && expectedScopedBuckets.size === scopedBucketReady.size;
+    if (allBucketsReady) {
       for (const local of localLeads) {
-        if (local.syncStatus === 'synced' && !remoteIds.has(local.id)) {
+        if (local.syncStatus === 'synced' && (!mergedMap.has(local.id) || !isLeadInAuthorizedScope(local))) {
           await LocalDB.deleteLead(local.id);
         }
       }
-
-      lastCloudSyncTime = Date.now();
-      await renderLeads();
-      await updateSettingsStats();
-      if (adminUnlocked) {
-        await renderAdminLeadsDbList();
-      }
-    } catch (e) {
-      console.warn('Leads snapshot processing error:', e);
     }
-  }, (err) => {
-    console.warn('Leads sync stream notice:', err);
+
+    lastCloudSyncTime = Date.now();
+    await renderLeads();
+    await updateSettingsStats();
+    if (adminUnlocked && typeof renderAdminLeadsDbList === 'function') {
+      await renderAdminLeadsDbList();
+    }
+  } catch (e) {
+    console.warn('Scoped leads flush error:', e);
+  }
+}
+
+function startFirestoreLeadsListener() {
+  if (!fb || !currentUser) return;
+  if (unsubscribeLeads) {
+    try { unsubscribeLeads(); } catch (e) {}
+    unsubscribeLeads = null;
+  }
+
+  currentLeadsScopeKey = getCurrentLeadsScopeKey();
+  const plans = buildScopedFirestorePlans();
+  scopedLeadBuckets = new Map();
+  scopedBucketReady = new Set();
+  expectedScopedBuckets = new Set(plans.map(p => p.id));
+
+  const unsubs = plans.map(plan => {
+    const onNext = async (snapshot) => {
+      const bucket = new Map();
+      snapshot.docs.forEach(docSnap => {
+        const d = docSnap.data();
+        bucket.set(d.id || docSnap.id, docSnap);
+      });
+      scopedLeadBuckets.set(plan.id, bucket);
+      scopedBucketReady.add(plan.id);
+      await flushScopedBucketsToLocalDB();
+    };
+    const onErr = (err) => {
+      console.warn(`Scoped leads stream notice (${plan.id}):`, err);
+      scopedBucketReady.add(plan.id);
+    };
+
+    if (plan.constraints.length === 0 || typeof fb.onQuerySnapshot !== 'function') {
+      return fb.onCollectionSnapshot('leads', onNext, onErr);
+    }
+    return fb.onQuerySnapshot('leads', plan.constraints, onNext, onErr);
   });
+
+  unsubscribeLeads = () => {
+    unsubs.forEach(fn => {
+      try { if (typeof fn === 'function') fn(); } catch (e) {}
+    });
+  };
 }
 
 // 9. ONLINE / OFFLINE & NAVIGATION
@@ -2381,9 +2552,11 @@ function parseSheetRowToLead(item, idx = 0) {
 
 function isSheetLeadAuthorizedForCurrentUser(lead) {
   if (!currentUser && !officerProfile.staffId && !officerProfile.officerName) return true;
-  if (typeof isPrimaryAdminUser === 'function' && isPrimaryAdminUser()) return true;
-  if (currentUserProfile && currentUserProfile.role === 'Admin') return true;
+  if (isUserAllBranchesAdmin()) return true;
   if (typeof isLeadOwnedByCurrentOfficer === 'function' && isLeadOwnedByCurrentOfficer(lead)) return true;
+
+  const canFilter = typeof canCurrentUserUseSupervisorFilter === 'function' ? canCurrentUserUseSupervisorFilter() : true;
+  if (!canFilter) return false;
 
   const effAllowed = typeof getEffectiveAllowedBranch === 'function' ? getEffectiveAllowedBranch() : '';
   if (!effAllowed) return false;
@@ -2682,32 +2855,51 @@ async function manualSync(silent = false) {
     // 1. Push any pending local leads upward to Firestore & Sheets
     const pushRes = await flushPendingLeadsToCloudAndSheets(true);
 
-    // 2. Pull fresh Cloud Leads, Products, Users, Config from Firestore
+    // 2. Pull fresh Scoped Cloud Leads, Profile, and Config from Firestore
     if (fb && currentUser) {
       try {
-        const snap = await Promise.race([
-          fb.getDocs('leads'),
+        await verifyUserAccessAndSyncProfile(currentUser, true);
+        const plans = buildScopedFirestorePlans();
+        const snaps = await Promise.race([
+          Promise.all(plans.map(plan => {
+            if (plan.constraints.length === 0 || typeof fb.queryCollection !== 'function') {
+              return fb.getDocs('leads');
+            }
+            return fb.queryCollection('leads', plan.constraints);
+          })),
           new Promise((_, rej) => setTimeout(() => rej(new Error('Firestore timeout')), 9000))
         ]);
+
         const localLeads = await LocalDB.getAllLeads();
         const localMap = new Map(localLeads.map(l => [l.id, l]));
+        const remoteMap = new Map();
 
-        for (const docSnap of snap.docs) {
-          const d = docSnap.data();
-          const leadId = d.id || docSnap.id;
+        snaps.forEach(snap => {
+          snap.docs.forEach(docSnap => {
+            const d = docSnap.data();
+            const leadId = d.id || docSnap.id;
+            const candidate = mapRemoteDocToLead(docSnap, localMap.get(leadId));
+            if (!isLeadInAuthorizedScope(candidate)) return;
+            const prev = remoteMap.get(leadId);
+            if (!prev || candidate.updatedAtMs >= prev.updatedAtMs) {
+              remoteMap.set(leadId, candidate);
+            }
+          });
+        });
+
+        for (const [leadId, remoteLead] of remoteMap.entries()) {
           const existing = localMap.get(leadId);
-          if (existing && existing.syncStatus === 'pending_sync' && (Number(existing.updatedAtMs) || 0) > (Number(d.updatedAtMs) || 0)) {
+          if (existing && existing.syncStatus === 'pending_sync' && (Number(existing.updatedAtMs) || 0) > (Number(remoteLead.updatedAtMs) || 0)) {
             continue;
           }
-          await LocalDB.saveLead({
-            id: leadId,
-            ...d,
-            notes: cleanRawActionPayload(d.notes || ''),
-            syncStatus: 'synced',
-            sheetsSynced: d.sheetsSynced === true || (existing ? Boolean(existing.sheetsSynced) : false)
-          });
+          await LocalDB.saveLead(remoteLead);
         }
-        await verifyUserAccessAndSyncProfile(currentUser, true);
+
+        for (const local of localLeads) {
+          if (local.syncStatus === 'synced' && (!remoteMap.has(local.id) || !isLeadInAuthorizedScope(local))) {
+            await LocalDB.deleteLead(local.id);
+          }
+        }
       } catch (e) {
         console.warn('Firestore manual sync notice:', e);
         if (!silent) showToast('⚠️ Firestore sync warning: ' + e.message);
