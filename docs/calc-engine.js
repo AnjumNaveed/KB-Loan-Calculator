@@ -397,9 +397,7 @@ function populateProducts(preserveId = null) {
   filtered.forEach(p => {
     const opt = document.createElement('option');
     opt.value = p.id;
-    const isLiab = p.category === 'liability';
-    const rateTxt = getProductRateRangeLabel(p);
-    opt.textContent = `${isLiab ? '💰' : '💼'} ${p.name} (${rateTxt} • ${String(p.rateType).toUpperCase()})`;
+    opt.textContent = p.name;
     select.appendChild(opt);
   });
 
@@ -434,7 +432,8 @@ function syncUiForSelectedProduct() {
   const dbrContent = document.getElementById('dbrCardContent');
   const depContent = document.getElementById('depositSummaryCardContent');
   const amortQuickRow = document.getElementById('amortQuickRow');
-  const viewColBtn = document.getElementById('viewCollateralBtn');
+  const viewColTitle = document.getElementById('viewCollateralTitle');
+  const viewColProd = document.getElementById('viewCollateralProdName');
 
   if (isLiab) {
     if (amountLabel) amountLabel.textContent = 'Desired Deposit Amount (PKR)';
@@ -442,14 +441,16 @@ function syncUiForSelectedProduct() {
     if (dbrContent) dbrContent.style.display = 'none';
     if (depContent) depContent.style.display = 'block';
     if (amortQuickRow) amortQuickRow.style.display = 'none';
-    if (viewColBtn) viewColBtn.textContent = `🛡️ View Deposit Rules & Terms (${currentProduct.name})`;
+    if (viewColTitle) viewColTitle.textContent = '🛡️ Deposit Rules & Terms';
+    if (viewColProd) viewColProd.textContent = currentProduct.name;
   } else {
     if (amountLabel) amountLabel.textContent = 'Desired Loan Amount (PKR)';
     if (amountInput) amountInput.placeholder = 'Blank = Auto-Max from DBR';
     if (dbrContent) dbrContent.style.display = 'block';
     if (depContent) depContent.style.display = 'none';
     if (amortQuickRow) amortQuickRow.style.display = 'flex';
-    if (viewColBtn) viewColBtn.textContent = `🛡️ View Security & Collateral Requirements (${currentProduct.name})`;
+    if (viewColTitle) viewColTitle.textContent = '🛡️ Security & Collateral Requirements';
+    if (viewColProd) viewColProd.textContent = currentProduct.name;
   }
 }
 
@@ -538,7 +539,7 @@ function resetCalculatorForm() {
   document.getElementById('leadNotes').value = '';
   document.getElementById('loanAmount').value = '';
   document.getElementById('monthlyIncome').value = '';
-  document.getElementById('allowedDbr').value = '50';
+  document.getElementById('allowedDbr').value = '';
   updateAgeEligibilityUI();
   calculate();
 }
@@ -1101,7 +1102,9 @@ function openSettlementBreakdownModal(month) {
 
 function buildSettlementText() {
   const m = amortState.selectedMonth || 1;
-  const cust = document.getElementById('customerName').value.trim() || 'Valued Client';
+  const rawCust = document.getElementById('customerName').value.trim() || 'Valued Client';
+  const cust = typeof toTitleCase === 'function' ? toTitleCase(rawCust) : rawCust;
+  const offName = typeof toTitleCase === 'function' ? toTitleCase(officerProfile.officerName || 'Officer') : (officerProfile.officerName || 'Officer');
   return [
     `🏛️ *KBL SETTLEMENT & INSTALLMENT BREAKDOWN (Month ${m})*`,
     `👤 Customer: ${cust}`,
@@ -1118,7 +1121,7 @@ function buildSettlementText() {
     `• Remaining Tenure: ${document.getElementById('settleRemMonths').textContent}`,
     `• Total Remaining Liability: *${document.getElementById('settleTotalRem').textContent}*`,
     `────────────────────`,
-    `🏦 Officer: ${officerProfile.officerName || 'Officer'} (${officerProfile.branchName || 'KBL Branch'})`
+    `🏦 Officer: ${offName} (${officerProfile.branchName || 'KBL Branch'})`
   ].join('\n');
 }
 
@@ -1141,7 +1144,8 @@ function copySettlementSummary() {
 }
 
 function buildAmortizationShareText(includeRows = false) {
-  const cust = document.getElementById('customerName').value.trim() || 'Valued Client';
+  const rawCust = document.getElementById('customerName').value.trim() || 'Valued Client';
+  const cust = typeof toTitleCase === 'function' ? toTitleCase(rawCust) : rawCust;
   const mob = document.getElementById('customerMobile').value.trim() || 'N/A';
   const feeRes = calculateProcessingFee(currentProduct, amortState.principal, Number(globalConfig.fedRate) || 16.0);
   const s = amortState.summary || {};

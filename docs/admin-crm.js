@@ -43,12 +43,17 @@ function doPost(e) {
     }
 
     if (data.action === "delete_leads" || data.action === "delete_lead") {
-      var deleteIds = data.leadIds || (data.leadId ? [data.leadId] : []);
+      var deleteIds = data.deleteIds || data.leadIds || (data.leadId ? [data.leadId] : []);
+      var deleteMobiles = (data.mobiles || []).map(cleanDigits).filter(Boolean);
       var lastRow = sheet.getLastRow();
-      if (lastRow > 1 && deleteIds.length > 0) {
-        var vals = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      if (lastRow > 1 && (deleteIds.length > 0 || deleteMobiles.length > 0)) {
+        var vals = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
         for (var r = vals.length - 1; r >= 0; r--) {
-          if (deleteIds.indexOf(String(vals[r][0]).trim()) !== -1) sheet.deleteRow(r + 2);
+          var rowId = String(vals[r][0]).trim();
+          var rowMob = cleanDigits(vals[r][3]);
+          if (deleteIds.indexOf(rowId) !== -1 || (rowMob && deleteMobiles.indexOf(rowMob) !== -1)) {
+            sheet.deleteRow(r + 2);
+          }
         }
       }
       return ContentService.createTextOutput(JSON.stringify({ status: "success" })).setMimeType(ContentService.MimeType.JSON);
@@ -72,12 +77,14 @@ function doPost(e) {
       var l = leads[i];
       var leadId = String(l.id || "").trim();
       var cleanPhone = cleanDigits(l.mobile);
+      var dateCreated = l.createdAtFormatted || l.timestamp || new Date().toLocaleString();
+      var auditText = l.activitiesAudit || l.touchpointLog || "";
       var rowData = [
-        leadId, l.timestamp || new Date().toLocaleString(), l.customerName || "", l.mobile || "",
+        leadId, dateCreated, l.customerName || "", l.mobile || "",
         l.category || "asset", l.productName || "", l.loanAmount || 0, l.tenureMonths || 0,
         l.monthlyEmi || 0, l.totalProfit || 0, l.processingFee || 0, l.status || "New",
         l.followUpDate || "", l.officerName || "", l.officerId || "", l.branchName || "",
-        l.notes || "", l.approachCount || 1, l.locationAddress || "", l.touchpointLog || ""
+        l.notes || "", l.approachCount || 1, l.locationAddress || "", auditText
       ];
       var targetRow = idToRowMap[leadId] || phoneToRowMap[cleanPhone] || null;
       if (targetRow) {
@@ -256,11 +263,11 @@ function getFilteredAuthorizedLeads(allLeads) {
     } else if (hasAllRights) {
       statusEl.style.color = 'var(--success)';
       statusEl.textContent = supQuery
-        ? `🔓 Admin Filter Active: Showing branch "${supQuery}"`
-        : '🔓 Admin / Regional Rights: All Branches Allowed';
+        ? `🔓 Admin Branch Filter Active: "${supQuery.toUpperCase() === 'ALL' ? 'ALL BRANCHES' : supQuery}"`
+        : '👤 Showing My Leads (Type branch name or "ALL" above to monitor other branches)';
     } else {
       statusEl.style.color = 'var(--primary)';
-      statusEl.textContent = `🛡️ Authorized Branch Scope: ${effAllowed || 'Own Branch'} (Viewing ${supQuery ? 'Branch Leads' : 'My Leads'})`;
+      statusEl.textContent = `🛡️ Authorized Branch: ${effAllowed || 'Own Branch'} (${supQuery ? 'Branch Leads Active' : 'Viewing My Leads'})`;
     }
   }
 
@@ -274,13 +281,11 @@ function getFilteredAuthorizedLeads(allLeads) {
     };
   }
 
-  // Narrow by authorization scope AND active branch supervisor query (for Admins too)
+  // Personal-First Default: Always show ONLY officer's own leads until a Branch Filter is entered
   const scopeLeads = allLeads.filter(l => {
     const effBranch = resolveLeadEffectiveBranch(l);
-    if (hasAllRights) {
-      return supQuery ? isBranchAuthorizedForQuery(supQuery, effBranch) : true;
-    }
     if (supQuery && canFilter) {
+      if (hasAllRights && supQuery.trim().toUpperCase() === 'ALL') return true;
       return isBranchAuthorizedForQuery(supQuery, effBranch);
     }
     return isLeadOwnedByCurrentOfficer(l);
@@ -302,10 +307,14 @@ function getFilteredAuthorizedLeads(allLeads) {
 
   filtered.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
-  let baseScope = 'Personal Portfolio';
-  if (supQuery) baseScope = `Branch Scope: ${supQuery}`;
-  else if (hasAllRights) baseScope = 'All Branches (Admin Scope)';
-  else if (officerProfile.branchName) baseScope = `My Leads • ${officerProfile.branchName}`;
+  let baseScope = 'My Personal Leads';
+  if (supQuery && canFilter) {
+    baseScope = (hasAllRights && supQuery.trim().toUpperCase() === 'ALL')
+      ? 'All Branches (Admin Filter)'
+      : `Branch Scope: ${supQuery}`;
+  } else if (officerProfile.branchName) {
+    baseScope = `My Leads • ${officerProfile.branchName}`;
+  }
 
   const parts = [baseScope];
   if (statusFilter !== 'All') parts.push(`Status: ${statusFilter}`);
@@ -318,14 +327,38 @@ function getFilteredAuthorizedLeads(allLeads) {
   };
 }
 
-function buildGpsMiniMapHtml(lead) {
-  const lat = Number(lead.latitude);
-  const lng = Number(lead.longitude);
-  const hasCoords = lead.latitude !== null && lead.latitude !== undefined && lead.latitude !== '' &&
+function parseLeadCoordinates(lead) {
+  let lat = Number(lead.latitude);
+  let lng = Number(lead.longitude);
+  let hasCoords = lead.latitude !== null && lead.latitude !== undefined && lead.latitude !== '' &&
     lead.longitude !== null && lead.longitude !== undefined && lead.longitude !== '' &&
     !isNaN(lat) && !isNaN(lng) && !(lat === 0 && lng === 0);
+
   const cleanAddr = (lead.locationAddress || '').trim();
-  const isGenericCoordAddr = /^GPS:\s*[-\d.]+\s*,\s*[-\d.]+$/i.test(cleanAddr);
+  if (!hasCoords && cleanAddr) {
+    const firstSegment = cleanAddr.split('|')[0].replace(/^GPS:\s*/i, '').trim();
+    const match = firstSegment.match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+    if (match) {
+      const pLat = parseFloat(match[1]);
+      const pLng = parseFloat(match[2]);
+      if (!isNaN(pLat) && !isNaN(pLng) && !(pLat === 0 && pLng === 0) && Math.abs(pLat) <= 90 && Math.abs(pLng) <= 180) {
+        lat = pLat;
+        lng = pLng;
+        hasCoords = true;
+      }
+    }
+  }
+
+  let displayArea = cleanAddr;
+  if (cleanAddr.includes('|')) {
+    displayArea = cleanAddr.split('|').slice(1).join('|').trim() || cleanAddr;
+  }
+  const isGenericCoordAddr = /^(?:GPS:\s*)?-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/i.test(displayArea);
+  return { hasCoords, lat, lng, cleanAddr, displayArea, isGenericCoordAddr };
+}
+
+function buildGpsMiniMapHtml(lead) {
+  const { hasCoords, lat, lng, cleanAddr, displayArea, isGenericCoordAddr } = parseLeadCoordinates(lead);
 
   if (!hasCoords && !cleanAddr) return '';
 
@@ -335,7 +368,7 @@ function buildGpsMiniMapHtml(lead) {
     const searchUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cleanAddr)}`;
     return `
       <div class="gps-addr-box">
-        <div><strong>📍 Location Captured${timeNote}:</strong> ${escapeHtml(cleanAddr)}</div>
+        <div><strong>📍 Captured Lead Location${timeNote}:</strong> ${escapeHtml(cleanAddr)}</div>
         <a href="${searchUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:4px;font-weight:800;color:var(--primary);text-decoration:none;">🗺️ Open in Google Maps ↗</a>
       </div>
     `;
@@ -357,29 +390,69 @@ function buildGpsMiniMapHtml(lead) {
   }
 
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-  const displayAddr = (!cleanAddr || isGenericCoordAddr) ? `GPS Coordinates: ${lat.toFixed(5)}, ${lng.toFixed(5)}` : cleanAddr;
-  const topPillText = (!cleanAddr || isGenericCoordAddr) ? `${lat.toFixed(4)}, ${lng.toFixed(4)}` : cleanAddr;
+  const areaLabel = (!displayArea || isGenericCoordAddr) ? `GPS Coordinates: ${lat.toFixed(5)}, ${lng.toFixed(5)}` : displayArea;
+  const topPillText = (!displayArea || isGenericCoordAddr) ? `${lat.toFixed(4)}, ${lng.toFixed(4)}` : displayArea;
 
   return `
     <div class="gps-addr-box">
-      <strong>📍 Location Captured${timeNote}:</strong> ${escapeHtml(displayAddr)}
+      <div style="font-weight: 800; color: var(--primary); font-size: 0.72rem; margin-bottom: 2px;">📍 Captured Lead Location (GPS)${timeNote}</div>
+      <div>${escapeHtml(areaLabel)}</div>
     </div>
     <a class="gps-map-card" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Tap to open location in Google Maps">
       <div class="gps-tile-grid">${tiles.join('')}</div>
       <div class="gps-map-top-badge">
         <span class="gps-badge-pill">📍 ${escapeHtml(topPillText)}</span>
-        <span class="gps-badge-pill" style="max-width:none;">${lat.toFixed(4)}, ${lng.toFixed(4)}</span>
+        <span class="gps-badge-pill" style="max-width:none;">${lat.toFixed(5)}, ${lng.toFixed(5)}</span>
       </div>
       <div class="gps-pin-center">
         <div class="gps-pin-pulse"></div>
         <div class="gps-pin-marker">📍</div>
       </div>
       <div class="gps-map-footer">
-        <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(displayAddr)}</span>
+        <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(areaLabel)}</span>
         <strong style="color:#FBBF24;white-space:nowrap;">Tap to open Google Maps ↗</strong>
       </div>
     </a>
   `;
+}
+
+function getTimelineCardMeta(actionType) {
+  const t = String(actionType || '').toLowerCase();
+  if (t === 'follow_up' || t === 'followup') return { cls: 'tl-followup', icon: '📅' };
+  if (t === 'note_update' || t === 'note') return { cls: 'tl-note', icon: '📝' };
+  if (t === 'call' || t === 'phone') return { cls: 'tl-call', icon: '📞' };
+  if (t === 'whatsapp') return { cls: 'tl-whatsapp', icon: '💬' };
+  if (t === 'sms') return { cls: 'tl-sms', icon: '✉️' };
+  if (t === 'status_change' || t === 'status') return { cls: 'tl-status', icon: '🔄' };
+  return { cls: 'tl-created', icon: '🎯' };
+}
+
+function renderActivityTimelineCardHtml(act) {
+  const meta = getTimelineCardMeta(act.actionType);
+  const cleanDetail = cleanRawActionPayload(act.details || '');
+  const timeStr = formatDate(act.timestamp);
+  const offLabel = typeof toTitleCase === 'function' ? toTitleCase(act.officerName || 'Officer') : (act.officerName || 'Officer');
+  return `
+    <div class="timeline-card ${meta.cls}">
+      <div class="tl-circle-icon">${meta.icon}</div>
+      <div style="min-width: 0; flex: 1;">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 6px; flex-wrap: wrap;">
+          <strong style="font-size: 0.78rem;">${escapeHtml(act.title || 'Activity')}</strong>
+          <span style="font-size: 0.68rem; opacity: 0.8; white-space: nowrap;">${timeStr}</span>
+        </div>
+        <div style="font-size: 0.76rem; margin-top: 2px; line-height: 1.35; word-break: break-word;">${escapeHtml(cleanDetail || act.details || '')}</div>
+        <div style="font-size: 0.68rem; opacity: 0.78; margin-top: 3px; font-weight: 700;">👤 ${escapeHtml(offLabel)} (${escapeHtml(act.officerId || 'RO')})</div>
+      </div>
+    </div>
+  `;
+}
+
+function isFollowUpDueAlert(lead) {
+  if (!lead.followUpDate || ['Converted', 'Lost'].includes(lead.status || 'New')) return false;
+  const datePart = String(lead.followUpDate).trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return false;
+  const todayStr = new Date().toISOString().slice(0, 10);
+  return datePart <= todayStr;
 }
 
 async function renderLeads() {
@@ -456,25 +529,43 @@ async function renderLeads() {
     const cleanNote = cleanRawActionPayload(lead.notes || '');
     const badgeClass = 'badge-' + (lead.status || 'new').toLowerCase().replace(/[^a-z]/g, '');
     const effBranch = resolveLeadEffectiveBranch(lead) || 'Unassigned';
-    const hasGps = (lead.latitude != null && lead.longitude != null && !(Number(lead.latitude) === 0 && Number(lead.longitude) === 0)) || Boolean((lead.locationAddress || '').trim());
+    const gpsInfo = parseLeadCoordinates(lead);
     const mapCardHtml = buildGpsMiniMapHtml(lead);
+    const isLiab = lead.category === 'liability';
+    const rawCust = lead.customerName || 'Customer';
+    const dispCust = typeof toTitleCase === 'function' ? toTitleCase(rawCust) : rawCust;
+    const rawOff = lead.officerName || 'RO';
+    const dispOff = typeof toTitleCase === 'function' ? toTitleCase(rawOff) : rawOff;
+    const avatarInitial = (dispCust.trim().charAt(0) || 'C').toUpperCase();
+    const activities = Array.isArray(lead.activities)
+      ? lead.activities.slice().sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+      : [];
+    const approachesCount = Number(lead.approachCount) || Math.max(1, activities.length);
+    const notesCount = Number(lead.notesUpdateCount) || activities.filter(a => a.actionType === 'note_update').length;
+    const followUpDue = isFollowUpDueAlert(lead);
+    const inlineActivitiesHtml = activities.slice(0, 4).map(renderActivityTimelineCardHtml).join('');
 
     return `
       <div class="lead-card ${isExpanded ? 'expanded' : ''}" id="lead-card-${lead.id}">
         <button type="button" class="lead-summary-btn" onclick="toggleLeadCardExpand('${lead.id}')">
+          <div class="lead-avatar ${isLiab ? 'lead-avatar-liab' : 'lead-avatar-asset'}">${escapeHtml(avatarInitial)}</div>
           <div style="min-width: 0; flex: 1;">
             <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-              <span class="lead-name">${escapeHtml(lead.customerName)}</span>
-              <span class="badge ${badgeClass}">${escapeHtml(lead.status || 'New')}</span>
+              <span class="lead-name">${escapeHtml(dispCust)}</span>
+              <span class="lead-cat-pill ${isLiab ? 'liability' : 'asset'}">${isLiab ? 'Deposit' : 'Loan'}</span>
             </div>
             <div class="lead-phone">
-              📞 ${escapeHtml(lead.mobile || 'N/A')} • 💼 ${escapeHtml(lead.productName)} • <strong>PKR ${formatPKR(lead.loanAmount)}</strong> (${lead.tenureMonths}M)
+              📞 ${escapeHtml(lead.mobile || 'N/A')} • ${escapeHtml(lead.productName)} • <strong>PKR ${formatPKR(lead.loanAmount)}</strong> (${lead.tenureMonths}M)
             </div>
             <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 3px;">
-              👤 ${escapeHtml(lead.officerName || 'RO')} (${escapeHtml(lead.officerId || 'N/A')}) • 🏢 ${escapeHtml(effBranch)} • 📊 Approaches: <strong>${lead.approachCount || 1}</strong> ${hasGps ? '• 📍 GPS' : ''}
+              👤 Leading: ${escapeHtml(dispOff)} (${escapeHtml(lead.officerId || 'RO')}) • 🏢 ${escapeHtml(effBranch)}${gpsInfo.hasCoords ? ' • 📍 GPS' : ''}
             </div>
+            ${followUpDue ? `<div class="lead-followup-alert">⏰ Follow-Up Due: ${escapeHtml(lead.followUpDate)}</div>` : ''}
           </div>
-          <span class="admin-chevron">${isExpanded ? 'Hide ▴' : 'Details ▾'}</span>
+          <div class="lead-right-col">
+            <span class="badge ${badgeClass}">${escapeHtml(lead.status || 'New')}</span>
+            <span class="admin-chevron">${isExpanded ? 'Fold ▴' : 'Expand ▾'}</span>
+          </div>
         </button>
 
         <div class="lead-details-body">
@@ -490,7 +581,30 @@ async function renderLeads() {
           </div>
 
           ${mapCardHtml}
+          <div style="margin: 6px 0 8px; display: flex; justify-content: flex-end;">
+            <button type="button" class="btn btn-soft btn-sm" style="width: auto; min-height: 30px; height: 30px; font-size: 0.72rem;" onclick="refreshLeadGps('${lead.id}')">📍 ${gpsInfo.hasCoords ? 'Refresh GPS Location' : 'Capture GPS Location'}</button>
+          </div>
           ${cleanNote ? `<div class="lead-notes-box">📝 <strong>Note:</strong> ${escapeHtml(cleanNote)}</div>` : ''}
+
+          <!-- Approach & Audit History Banner (Android Parity) -->
+          <div class="audit-stats-banner">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+              <strong style="font-size: 0.78rem; color: var(--primary);">📊 Approach &amp; Audit History</strong>
+              <button type="button" class="btn btn-outline btn-sm" style="width: auto; min-height: 26px; height: 26px; font-size: 0.7rem; padding: 0 8px;" onclick="openTrackRecord('${lead.id}')">View All (${activities.length})</button>
+            </div>
+            <div class="audit-stats-grid">
+              <div class="audit-stat-pill">
+                <span class="audit-stat-label">Approaches</span>
+                <span class="audit-stat-val tabular-nums">${approachesCount} Time${approachesCount === 1 ? '' : 's'}</span>
+              </div>
+              <div class="audit-stat-pill">
+                <span class="audit-stat-label">Note Updates</span>
+                <span class="audit-stat-val tabular-nums">${notesCount} Time${notesCount === 1 ? '' : 's'}</span>
+              </div>
+            </div>
+          </div>
+
+          ${activities.length > 0 ? `<div class="timeline-list">${inlineActivitiesHtml}</div>` : ''}
 
           <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
             <label style="font-size: 0.76rem; font-weight: 700; color: var(--text-muted);">Update Pipeline Status:</label>
@@ -503,7 +617,7 @@ async function renderLeads() {
             <button type="button" class="btn btn-call" onclick="initiateCall('${lead.id}', '${escapeHtml(lead.mobile)}')">📞 Call</button>
             <button type="button" class="btn btn-whatsapp" onclick="sendQuotationWhatsApp('${lead.id}')">💬 WhatsApp</button>
             <button type="button" class="btn btn-sms" onclick="sendQuotationSMS('${lead.id}')">✉️ SMS</button>
-            <button type="button" class="btn btn-outline" onclick="openTrackRecord('${lead.id}')">📜 History (${(lead.activities || []).length})</button>
+            <button type="button" class="btn btn-outline" onclick="openTrackRecord('${lead.id}')">📜 History (${activities.length})</button>
             <button type="button" class="btn btn-outline" onclick="openEditNoteModal('${lead.id}')">📝 Note</button>
             <button type="button" class="btn btn-outline" onclick="openFollowUpModal('${lead.id}')">📅 Follow-Up</button>
           </div>
@@ -520,7 +634,7 @@ function toggleLeadCardExpand(leadId) {
   if (el) {
     el.classList.toggle('expanded');
     const chev = el.querySelector('.admin-chevron');
-    if (chev) chev.textContent = el.classList.contains('expanded') ? 'Hide ▴' : 'Details ▾';
+    if (chev) chev.textContent = el.classList.contains('expanded') ? 'Fold ▴' : 'Expand ▾';
   }
 }
 
@@ -1178,32 +1292,215 @@ async function deleteAdminProduct(productId) {
   });
 }
 
-function exportProductsJson() {
-  const blob = new Blob([JSON.stringify(BANK_PRODUCTS, null, 2)], { type: 'application/json' });
+const PRODUCT_CSV_HEADERS = [
+  'id', 'name', 'category', 'rateType', 'defaultAnnualRate',
+  'feeType', 'defaultFeeValue', 'fedRate',
+  'minAmount', 'maxAmount', 'minTenure', 'maxTenure',
+  'minAge', 'maxAgeAtMaturity', 'liabilityPricingType',
+  'collateralDetails', 'rateSlabsJson', 'feeSlabsJson', 'tenureRatesJson'
+];
+
+function exportProductsCsv() {
+  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = BANK_PRODUCTS.map(p => [
+    p.id || '',
+    p.name || '',
+    p.category || 'asset',
+    p.rateType || 'reducing',
+    p.defaultAnnualRate ?? 0,
+    p.feeType || 'percentage',
+    p.defaultFeeValue ?? p.feePercent ?? 1.5,
+    p.fedRate ?? globalConfig.fedRate ?? 16.0,
+    p.minAmount ?? 50000,
+    p.maxAmount ?? 1000000,
+    p.minTenure ?? 1,
+    p.maxTenure ?? 36,
+    p.minAge ?? 21,
+    p.maxAgeAtMaturity ?? 65,
+    p.liabilityPricingType || '',
+    p.collateralDetails || '',
+    JSON.stringify(Array.isArray(p.rateSlabs) ? p.rateSlabs : []),
+    JSON.stringify(Array.isArray(p.feeSlabs) ? p.feeSlabs : []),
+    JSON.stringify(p.tenureRates && typeof p.tenureRates === 'object' ? p.tenureRates : {})
+  ].map(esc).join(','));
+
+  const csv = '\uFEFF' + [PRODUCT_CSV_HEADERS.map(esc).join(','), ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `kbl-products-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `kbl-products-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast(`📥 Exported ${BANK_PRODUCTS.length} product(s) to CSV!`);
 }
 
-async function confirmBulkImportProducts() {
-  const raw = document.getElementById('bulkImportTextarea').value.trim();
-  if (!raw) return;
-  await withLoading('Importing Products...', async () => {
-    try {
-      const arr = JSON.parse(raw);
-      if (!Array.isArray(arr)) throw new Error('Expected JSON array.');
-      for (const p of arr) {
-        const pId = p.id || ('prod-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5));
-        if (fb) {
-          await fb.setDoc('products', pId, { ...p, id: pId, updatedAt: fb.serverTimestamp() }, true);
-        }
+function handleBulkCsvFileSelect(event) {
+  const file = event && event.target && event.target.files ? event.target.files[0] : null;
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const ta = document.getElementById('bulkImportTextarea');
+    if (ta) ta.value = String(e.target.result || '');
+  };
+  reader.readAsText(file);
+}
+
+function parseCsvMatrix(text) {
+  const clean = String(text || '').replace(/^\uFEFF/, '');
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean[i];
+    const next = clean[i + 1];
+    if (inQuotes) {
+      if (ch === '"' && next === '"') {
+        field += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        field += ch;
       }
+    } else {
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ',') {
+        row.push(field);
+        field = '';
+      } else if (ch === '\r' && next === '\n') {
+        row.push(field);
+        rows.push(row);
+        row = [];
+        field = '';
+        i++;
+      } else if (ch === '\n' || ch === '\r') {
+        row.push(field);
+        rows.push(row);
+        row = [];
+        field = '';
+      } else {
+        field += ch;
+      }
+    }
+  }
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows.filter(r => r.some(cell => String(cell).trim() !== ''));
+}
+
+async function confirmBulkImportProductsCsv() {
+  const raw = (document.getElementById('bulkImportTextarea')?.value || '').trim();
+  if (!raw) {
+    showToast('Select a CSV file or paste CSV data first.');
+    return;
+  }
+
+  await withLoading('Importing Products CSV...', async () => {
+    try {
+      const matrix = parseCsvMatrix(raw);
+      if (matrix.length < 2) throw new Error('CSV must include a header row and at least one product row.');
+
+      const headerRow = matrix[0].map(h => h.trim());
+      const colIndex = {};
+      headerRow.forEach((h, idx) => { colIndex[h] = idx; });
+      if (colIndex['name'] === undefined) {
+        throw new Error('Missing required "name" column in CSV header.');
+      }
+
+      const getVal = (r, key, defVal = '') => {
+        const idx = colIndex[key];
+        return idx !== undefined && r[idx] !== undefined ? String(r[idx]).trim() : defVal;
+      };
+      const safeJson = (str, fallback) => {
+        if (!str) return fallback;
+        try { return JSON.parse(str); } catch (e) { return fallback; }
+      };
+
+      let importedCount = 0;
+      for (let i = 1; i < matrix.length; i++) {
+        const r = matrix[i];
+        const name = getVal(r, 'name');
+        if (!name) continue;
+
+        const pId = getVal(r, 'id') || ('prod-' + Date.now() + '-' + i);
+        const category = getVal(r, 'category', 'asset').toLowerCase() === 'liability' ? 'liability' : 'asset';
+        const rateType = getVal(r, 'rateType', 'reducing').toLowerCase();
+        const defaultAnnualRate = parseFloat(getVal(r, 'defaultAnnualRate', '0')) || 0;
+        const feeType = getVal(r, 'feeType', 'percentage').toLowerCase();
+        const defaultFeeValue = parseFloat(getVal(r, 'defaultFeeValue', category === 'liability' ? '0' : '1.5')) || 0;
+        const fedRate = parseFloat(getVal(r, 'fedRate', String(globalConfig.fedRate || 16))) || 16.0;
+        const minAmount = parseInt(getVal(r, 'minAmount', '50000'), 10) || 0;
+        const maxAmount = parseInt(getVal(r, 'maxAmount', '1000000'), 10) || 1000000;
+        const minTenure = parseInt(getVal(r, 'minTenure', '1'), 10) || 1;
+        const maxTenure = parseInt(getVal(r, 'maxTenure', '36'), 10) || 36;
+        const minAge = parseInt(getVal(r, 'minAge', '21'), 10) || 21;
+        const maxAgeAtMaturity = parseInt(getVal(r, 'maxAgeAtMaturity', '65'), 10) || 65;
+        const liabilityPricingType = getVal(r, 'liabilityPricingType', '');
+        const collateralDetails = getVal(r, 'collateralDetails', '');
+        const rateSlabs = safeJson(getVal(r, 'rateSlabsJson', '[]'), []);
+        const feeSlabs = safeJson(getVal(r, 'feeSlabsJson', '[]'), []);
+        const tenureRates = safeJson(getVal(r, 'tenureRatesJson', '{}'), {});
+
+        let tenures = [];
+        if (tenureRates && Object.keys(tenureRates).length > 0) {
+          tenures = Object.keys(tenureRates).map(Number).filter(n => !isNaN(n) && n > 0).sort((a, b) => a - b);
+        } else {
+          for (let t = Math.max(6, minTenure); t <= maxTenure; t += 6) {
+            tenures.push(t);
+          }
+          if (minTenure > 0 && !tenures.includes(minTenure)) tenures.unshift(minTenure);
+          if (maxTenure > 0 && !tenures.includes(maxTenure)) tenures.push(maxTenure);
+        }
+
+        const prodObj = {
+          id: pId,
+          name,
+          category,
+          rateType,
+          defaultAnnualRate,
+          feeType,
+          feePercent: defaultFeeValue,
+          defaultFeeValue,
+          fedRate,
+          minAmount,
+          maxAmount,
+          minTenure,
+          maxTenure,
+          minAge,
+          maxAgeAtMaturity,
+          liabilityPricingType,
+          collateralDetails,
+          rateSlabs: Array.isArray(rateSlabs) ? rateSlabs : [],
+          feeSlabs: Array.isArray(feeSlabs) ? feeSlabs : [],
+          tenureRates: tenureRates && typeof tenureRates === 'object' ? tenureRates : {},
+          tenures: tenures.length > 0 ? tenures : [6, 12, 18, 24, 36]
+        };
+
+        const idx = BANK_PRODUCTS.findIndex(x => x.id === pId);
+        if (idx >= 0) BANK_PRODUCTS[idx] = prodObj;
+        else BANK_PRODUCTS.push(prodObj);
+
+        if (fb) {
+          await fb.setDoc('products', pId, { ...prodObj, updatedAt: fb.serverTimestamp() }, true);
+        }
+        importedCount++;
+      }
+
       closeModal('bulkImportModal');
-      showToast(`✅ Imported ${arr.length} products to Firestore!`);
+      const fileInp = document.getElementById('bulkCsvFileInput');
+      if (fileInp) fileInp.value = '';
+      populateProducts(currentProduct ? currentProduct.id : null);
+      calculate();
+      renderAdminProductsList();
+      showToast(`✅ Imported ${importedCount} product(s) from CSV & synced!`);
     } catch (e) {
-      showToast('❌ Invalid JSON: ' + e.message);
+      showToast('❌ CSV Import Error: ' + e.message);
     }
   });
 }

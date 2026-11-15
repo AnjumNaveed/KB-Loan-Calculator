@@ -12,7 +12,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="KBL Calc">
-  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192' width='192' height='192'%3E%3Crect width='192' height='192' rx='42' fill='%231E3A8A'/%3E%3Cpath d='M96 38L42 70v14h108V70L96 38zm-44 54h18v52H52V92zm36 0h18v52H88V92zm36 0h18v52h-18V92zM36 150v14h120v-14H36z' fill='%23FBBF24'/%3E%3C/svg%3E">
+  <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+  <link rel="apple-touch-icon" href="./icon-192.png">
 
   <link rel="stylesheet" href="./styles.css">
   <script src="https://accounts.google.com/gsi/client" async defer onload="window.dispatchEvent(new Event('gis-script-ready'))"></script>
@@ -84,6 +85,8 @@
             <span class="status-dot" id="statusDot"></span>
             <span id="statusText">Online</span>
           </div>
+
+          <button type="button" class="header-profile-btn" id="headerProfileBtn" onclick="switchTab('settingsTab')" title="Officer Profile & Offline Backup" aria-label="Officer Profile">👤</button>
         </div>
       </div>
 
@@ -93,22 +96,19 @@
       </div>
     </header>
 
-    <!-- iOS / Android Home Screen Install Banner -->
+    <!-- iOS / Android Home Screen / App Drawer Install Banner -->
     <div class="install-banner" id="pwaBanner">
-      <span>📲 Add KBL Calculator to Home Screen for instant offline access</span>
-      <button type="button" onclick="showInstallHelp()">How to Add</button>
+      <span id="pwaBannerText">📲 Install KBL App on Home Screen / App Drawer</span>
+      <button type="button" id="pwaInstallBtn" onclick="triggerPwaInstall()">📲 Install App</button>
     </div>
 
-    <!-- Navigation Tabs (1. Calculator, 2. Leads, 3. Profile, 4. Admin & Slabs) -->
+    <!-- Navigation Tabs (1. Calculator, 2. Leads, 3. Admin & Slabs) -->
     <nav class="tab-nav">
       <div class="nav-item active" data-tab="calcTab" onclick="switchTab('calcTab', this)">
         <span>📊</span> Calculator
       </div>
       <div class="nav-item" data-tab="leadsTab" onclick="switchTab('leadsTab', this)">
         <span>👥</span> Leads (<span id="leadsCount">0</span>)
-      </div>
-      <div class="nav-item" data-tab="settingsTab" onclick="switchTab('settingsTab', this)">
-        <span>⚙️</span> Profile
       </div>
       <div class="nav-item" data-tab="adminTab" onclick="switchTab('adminTab', this)">
         <span id="adminNavIcon">🔒</span> Admin &amp; Slabs
@@ -161,10 +161,10 @@
               <span id="firestoreProductSyncBadge" style="font-size: 0.72rem; color: var(--success); font-weight: 700;">⚡ Live Ready</span>
             </div>
 
-            <!-- Category Filter Pills: All, Asset, Liability -->
+            <!-- Category Filter Pills: All, Asset, Liability (Equal Width Single Row) -->
             <div class="form-group">
               <label class="form-label">Facility Category Filter</label>
-              <div class="chip-row">
+              <div class="cat-chip-grid">
                 <button type="button" class="chip-btn active" id="catAllBtn" onclick="setCategory('all')">All (0)</button>
                 <button type="button" class="chip-btn" id="catAssetBtn" onclick="setCategory('asset')">💼 Asset (0)</button>
                 <button type="button" class="chip-btn" id="catLiabBtn" onclick="setCategory('liability')">💰 Liability (0)</button>
@@ -183,10 +183,11 @@
               <select class="form-select" id="productSelect" onchange="onProductChange()"></select>
             </div>
 
-            <!-- View Security & Collateral Details -->
+            <!-- View Security & Collateral Details (Two-Line Button) -->
             <div class="form-group">
-              <button type="button" class="btn btn-soft btn-sm" id="viewCollateralBtn" onclick="openCollateralModal()">
-                🛡️ View Security &amp; Collateral Requirements
+              <button type="button" class="btn btn-soft collateral-btn-multiline" id="viewCollateralBtn" onclick="openCollateralModal()">
+                <span id="viewCollateralTitle">🛡️ Security &amp; Collateral Requirements</span>
+                <span id="viewCollateralProdName" class="collateral-btn-sub">Select a facility</span>
               </button>
             </div>
 
@@ -198,12 +199,6 @@
               </div>
               <input type="number" class="form-input" id="loanAmount" value="" placeholder="Blank = Auto-Max from DBR" oninput="calculate()">
               <div id="desiredAmountHint" style="font-size: 0.74rem; color: var(--accent); font-weight: 700; margin-top: 4px; line-height: 1.35;"></div>
-            </div>
-
-            <!-- Quick Tenure Selector for Quick Quote Preview -->
-            <div class="form-group">
-              <label class="form-label" for="tenureMonths">Active Preview Tenure (Months)</label>
-              <select class="form-select" id="tenureMonths" onchange="onTenureSelectChange()"></select>
             </div>
 
             <!-- Tax Filer / Non-Filer Selector for Deposits -->
@@ -228,12 +223,12 @@
               </div>
               <div class="form-row">
                 <div class="form-group">
-                  <label class="form-label" for="monthlyIncome">Net Monthly Income (PKR)</label>
+                  <label class="form-label" for="monthlyIncome">Net Income</label>
                   <input type="number" class="form-input" id="monthlyIncome" placeholder="e.g. 150000" oninput="calculate()">
                 </div>
                 <div class="form-group">
-                  <label class="form-label" for="allowedDbr">Manual Allowed DBR (%)</label>
-                  <input type="number" class="form-input" id="allowedDbr" value="50" min="1" max="100" placeholder="50" oninput="calculate()">
+                  <label class="form-label" for="allowedDbr">Allowed DBR</label>
+                  <input type="number" class="form-input" id="allowedDbr" value="" min="1" max="100" placeholder="e.g. 50" oninput="calculate()">
                 </div>
               </div>
 
@@ -279,6 +274,12 @@
             <div class="card-title">
               <span class="card-title-left"><span>📤</span> Dispatch &amp; Communication</span>
               <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700;">Auto-Saves Lead</span>
+            </div>
+
+            <!-- Compact Active Preview Tenure Selector -->
+            <div class="tenure-dispatch-bar">
+              <label class="tenure-dispatch-label" for="tenureMonths">Active Preview Tenure</label>
+              <select class="form-select tenure-dispatch-select" id="tenureMonths" onchange="onTenureSelectChange()"></select>
             </div>
 
             <!-- Live Selected Plan Quick Breakdown -->
@@ -466,7 +467,7 @@
             <label class="form-label" for="supervisorBranchInput" style="margin-bottom: 0;">3. 🛡️ Branch Supervisor Filter (BM / AM / RM Rights)</label>
             <button type="button" class="btn btn-soft btn-sm" id="toggleMyBranchBtn" style="width: auto; min-height: 30px; height: 30px; font-size: 0.72rem;" onclick="toggleMyBranchFilter()">🏢 Filter My Branch</button>
           </div>
-          <input type="text" class="form-input" id="supervisorBranchInput" placeholder="Type authorized branch name (e.g. PSR or Peshawar)..." oninput="renderLeads()">
+          <input type="text" class="form-input" id="supervisorBranchInput" placeholder="Type branch name..." oninput="renderLeads()">
           <div id="supervisorAccessStatus" style="font-size: 0.74rem; font-weight: 700; margin-top: 6px; color: var(--text-muted);"></div>
         </div>
       </div>
@@ -570,7 +571,7 @@
                 </div>
               </div>
               <div class="btn-group">
-                <button type="button" class="btn btn-primary btn-sm" onclick="adminUpdatePassword()">🔑 Update Password in Firestore</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="adminUpdatePassword()">🔑 Update Password</button>
                 <button type="button" class="btn btn-outline btn-sm" onclick="lockAdminPanel()">🔒 Lock Now</button>
               </div>
             </div>
@@ -669,8 +670,8 @@
               <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;">
                 <button type="button" class="btn btn-primary btn-sm" style="width: auto;" onclick="openNewProductModal('asset')">➕ Asset Facility (لون)</button>
                 <button type="button" class="btn btn-teal btn-sm" style="width: auto;" onclick="openNewProductModal('liability')">➕ Liability (ڈپازٹ)</button>
-                <button type="button" class="btn btn-outline btn-sm" style="width: auto;" onclick="exportProductsJson()">📥 Export JSON</button>
-                <button type="button" class="btn btn-outline btn-sm" style="width: auto;" onclick="openModal('bulkImportModal')">📤 Import JSON</button>
+                <button type="button" class="btn btn-outline btn-sm" style="width: auto;" onclick="exportProductsCsv()">📥 Export CSV</button>
+                <button type="button" class="btn btn-outline btn-sm" style="width: auto;" onclick="openModal('bulkImportModal')">📤 Import CSV</button>
               </div>
               <div class="form-row stack-xs" style="margin-bottom: 10px;">
                 <div class="chip-row">
@@ -741,6 +742,10 @@
     <!-- TAB 3: OFFICER PROFILE & PERSONAL OFFLINE BACKUP           -->
     <!-- ========================================================== -->
     <section class="tab-content" id="settingsTab">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; flex-wrap: wrap;">
+        <button type="button" class="btn btn-outline btn-sm" style="width: auto;" onclick="switchTab('calcTab')">← Back to Calculator</button>
+        <span style="font-size: 0.78rem; font-weight: 800; color: var(--text-muted);">Officer Profile &amp; Offline Backup</span>
+      </div>
       <div class="admin-cards-grid">
         <div class="card">
           <div class="card-title"><span class="card-title-left"><span>🔐</span> Google Account &amp; Access</span></div>
@@ -776,10 +781,10 @@
           </div>
           <div class="form-group">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-              <label class="form-label" for="settingsBranch" style="margin-bottom: 0;">Assigned Branch (Cloud-Locked)</label>
-              <span style="font-size: 0.68rem; font-weight: 800; color: var(--primary);">🔒 Synced from Admin</span>
+              <label class="form-label" for="settingsBranch" style="margin-bottom: 0;">Assigned Branch</label>
+              <span style="font-size: 0.68rem; font-weight: 800; color: var(--success);">☁️ Auto-Synced &amp; Editable</span>
             </div>
-            <input type="text" class="form-input" id="settingsBranch" readonly title="Assigned by Admin in Cloud" placeholder="Synced after Google Sign-In">
+            <input type="text" class="form-input" id="settingsBranch" placeholder="e.g. Peshawar Main Branch">
           </div>
           <button type="button" class="btn btn-primary" onclick="saveSettings()">💾 Save Profile &amp; Sync to Cloud</button>
         </div>
@@ -874,12 +879,10 @@
           </div>
         </div>
         <div class="modal-body">
-          <!-- Recalculation Strategy Mode Toggle -->
-          <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;">
-            <div class="chip-row" style="flex: 1;">
-              <button type="button" class="chip-btn active" id="modeReduceEmiBtn" onclick="setPrepaymentMode('reduce_emi')" style="flex: 1;">📉 Reduce EMI (قسط کم کریں)</button>
-              <button type="button" class="chip-btn" id="modeReduceTenureBtn" onclick="setPrepaymentMode('reduce_tenure')" style="flex: 1;">⏳ Reduce Tenure (مدت کم کریں)</button>
-            </div>
+          <!-- Recalculation Strategy Mode Toggle (Single Horizontal Row) -->
+          <div class="prepay-toggle-grid">
+            <button type="button" class="chip-btn active" id="modeReduceEmiBtn" onclick="setPrepaymentMode('reduce_emi')">📉 Reduce EMI</button>
+            <button type="button" class="chip-btn" id="modeReduceTenureBtn" onclick="setPrepaymentMode('reduce_tenure')">⏳ Reduce Tenure</button>
           </div>
 
           <!-- Prepayment Savings Banner -->
@@ -1197,19 +1200,27 @@
       </div>
     </div>
 
-    <!-- MODAL 11: BULK PRODUCT IMPORT -->
+    <!-- MODAL 11: BULK PRODUCT CSV IMPORT -->
     <div class="modal-overlay" id="bulkImportModal">
-      <div class="modal-dialog">
+      <div class="modal-dialog modal-lg">
         <div class="modal-header">
-          <div class="modal-title">📤 Bulk Import Products (JSON)</div>
+          <div class="modal-title">📤 Bulk Import Products (Excel CSV)</div>
           <button type="button" class="modal-close" onclick="closeModal('bulkImportModal')">&times;</button>
         </div>
         <div class="modal-body">
-          <div class="form-group">
-            <label class="form-label" for="bulkImportTextarea">Paste Exported Products JSON Array</label>
-            <textarea class="form-textarea" id="bulkImportTextarea" style="min-height: 180px;" placeholder='[{"id":"prod-...", "name":"..."}]'></textarea>
+          <div style="background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 0.76rem; color: var(--text-muted); margin-bottom: 10px; line-height: 1.45;">
+            Upload a <strong>.csv</strong> file exported from Admin (editable in Microsoft Excel) or paste CSV rows below.<br>
+            Columns include <code>id, name, category, rateType, defaultAnnualRate, defaultFeeValue, fedRate, minAmount, maxAmount, minTenure, maxTenure, minAge, maxAgeAtMaturity, collateralDetails, rateSlabsJson, feeSlabsJson, tenureRatesJson</code>.
           </div>
-          <button type="button" class="btn btn-primary" onclick="confirmBulkImportProducts()">💾 Import &amp; Sync to Firestore</button>
+          <div class="form-group">
+            <label class="form-label" for="bulkCsvFileInput">Choose CSV File (.csv)</label>
+            <input type="file" class="form-input" id="bulkCsvFileInput" accept=".csv,text/csv" style="padding: 8px 10px; height: auto;" onchange="handleBulkCsvFileSelect(event)">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="bulkImportTextarea">CSV Data Preview / Paste</label>
+            <textarea class="form-textarea" id="bulkImportTextarea" style="min-height: 160px; font-family: monospace; font-size: 0.74rem;" placeholder="id,name,category,rateType,defaultAnnualRate,..."></textarea>
+          </div>
+          <button type="button" class="btn btn-primary" onclick="confirmBulkImportProductsCsv()">💾 Import CSV &amp; Sync to Firestore</button>
         </div>
       </div>
     </div>
@@ -1229,7 +1240,7 @@
           </ol>
           <h4 style="color: var(--primary); margin-bottom: 6px;">🤖 Android &amp; Desktop (Chrome / Edge):</h4>
           <ol style="padding-left: 20px;">
-            <li>Open Menu / Address bar ➔ Click <strong>Install App</strong>.</li>
+            <li>Tap the <strong>📲 Install App</strong> button in the banner, or open Chrome Menu (⋮) ➔ <strong>Install app</strong> (not "Add shortcut").</li>
           </ol>
         </div>
       </div>
@@ -1267,6 +1278,33 @@
             <strong>Setup Note:</strong> Ensure <code id="gisOriginText" style="font-weight: 700;"></code> is listed in <em>Google Cloud Console ➔ Credentials ➔ Web Client ➔ Authorized JavaScript origins</em>.
           </div>
           <button type="button" class="btn btn-outline btn-sm" onclick="signInWithFirebasePopupFallback()">Alternative Sign-In (Backup)</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 15: FIRST-TIME OFFICER ONBOARDING -->
+    <div class="modal-overlay" id="onboardingModal" style="z-index: 210;">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <div class="modal-title">👋 Welcome! Complete Officer Setup</div>
+        </div>
+        <div class="modal-body">
+          <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 12px; line-height: 1.45;">
+            پہلی بار سائن ان پر اپنا نام، اسٹاف آئی ڈی اور برانچ درج کریں تاکہ آپ کی تمام لیڈز صحیح برانچ کے ساتھ سنک ہوں۔
+          </p>
+          <div class="form-group">
+            <label class="form-label" for="obOfficerName">Officer Name</label>
+            <input type="text" class="form-input" id="obOfficerName" placeholder="e.g. Muhammad Ali">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="obStaffId">Staff / Officer ID</label>
+            <input type="text" class="form-input" id="obStaffId" placeholder="e.g. RO-1042">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="obBranchName">Branch Name</label>
+            <input type="text" class="form-input" id="obBranchName" placeholder="e.g. Peshawar Main Branch">
+          </div>
+          <button type="button" class="btn btn-primary" onclick="confirmOnboardingProfile()">✅ Save &amp; Continue</button>
         </div>
       </div>
     </div>

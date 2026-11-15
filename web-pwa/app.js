@@ -18,6 +18,9 @@ let unsubscribeUsersCol = null;
 let toastTimer = null;
 let cachedLeadsList = [];
 let activeLoadingCount = 0;
+let deferredInstallPrompt = null;
+let lastKnownGeoLocation = null;
+let onboardingShownThisSession = false;
 
 let globalConfig = {
   fedRate: 16.0,
@@ -334,9 +337,60 @@ let officerProfile = {
   webhookUrl: ''
 };
 
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  updatePwaBannerState();
+});
+
+window.addEventListener('appinstalled', () => {
+  deferredInstallPrompt = null;
+  updatePwaBannerState();
+  showToast('📲 KBL Loan Calculator installed as App!');
+});
+
+function updatePwaBannerState() {
+  const banner = document.getElementById('pwaBanner');
+  const txt = document.getElementById('pwaBannerText');
+  const btn = document.getElementById('pwaInstallBtn');
+  if (!banner) return;
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (isStandalone) {
+    banner.style.display = 'none';
+    return;
+  }
+  banner.style.display = 'flex';
+  if (deferredInstallPrompt) {
+    if (txt) txt.textContent = '📲 Install KBL Loan Calculator directly to your App Drawer';
+    if (btn) btn.textContent = '📲 Install App';
+  } else {
+    if (txt) txt.textContent = '📲 Add KBL App to Home Screen / App Drawer';
+    if (btn) btn.textContent = '📲 Install App';
+  }
+}
+
+async function triggerPwaInstall() {
+  if (deferredInstallPrompt) {
+    try {
+      deferredInstallPrompt.prompt();
+      const choice = await deferredInstallPrompt.userChoice;
+      if (choice && choice.outcome === 'accepted') {
+        deferredInstallPrompt = null;
+        updatePwaBannerState();
+        showToast('✅ Installing KBL App...');
+        return;
+      }
+    } catch (e) {
+      console.warn('PWA install prompt notice:', e);
+    }
+  }
+  openModal('installGuideModal');
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
   const savedTheme = await LocalDB.getSetting('themeMode', 'light');
   applyThemeMode(savedTheme);
+  updatePwaBannerState();
 
   await loadSettings();
   populateProducts();
@@ -344,6 +398,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   await renderLeads();
   updateOnlineStatus();
   updateSettingsStats();
+  prewarmGeoLocation();
 
   if (window.FirebaseBridge) {
     initFirebaseAuthAndFirestore();
@@ -663,7 +718,7 @@ async function verifyUserAccessAndSyncProfile(user) {
       }
     }
 
-    const displayName = officerProfile.officerName || user.displayName || 'Officer';
+    const displayName = toTitleCase(officerProfile.officerName || user.displayName || 'Officer');
     const displayStaff = officerProfile.staffId || 'RO';
     const displayBranch = officerProfile.branchName || 'Unassigned';
 
@@ -679,11 +734,47 @@ async function verifyUserAccessAndSyncProfile(user) {
       statusEl.style.color = '#16A34A';
     }
 
+    openOnboardingModalIfNeeded(user);
+
     await renderLeads();
     updateSettingsStats();
   } catch (err) {
     console.warn('Error verifying user access in Firestore:', err);
   }
+}
+
+function openOnboardingModalIfNeeded(user) {
+  if (!user || onboardingShownThisSession) return;
+  const needsName = !officerProfile.officerName || officerProfile.officerName.trim().toLowerCase() === 'loan officer';
+  const needsStaff = !officerProfile.staffId || /^RO-[A-F0-9]{4}$/i.test(officerProfile.staffId.trim());
+  const needsBranch = !officerProfile.branchName || !officerProfile.branchName.trim();
+  if (needsName || needsStaff || needsBranch) {
+    onboardingShownThisSession = true;
+    const obName = document.getElementById('obOfficerName');
+    const obStaff = document.getElementById('obStaffId');
+    const obBranch = document.getElementById('obBranchName');
+    if (obName) obName.value = officerProfile.officerName && officerProfile.officerName !== 'Loan Officer' ? officerProfile.officerName : (user.displayName || '');
+    if (obStaff) obStaff.value = officerProfile.staffId || '';
+    if (obBranch) obBranch.value = officerProfile.branchName || '';
+    openModal('onboardingModal');
+  }
+}
+
+async function confirmOnboardingProfile() {
+  const nameRaw = (document.getElementById('obOfficerName')?.value || '').trim();
+  const staffRaw = (document.getElementById('obStaffId')?.value || '').trim();
+  const branchRaw = (document.getElementById('obBranchName')?.value || '').trim();
+
+  if (!nameRaw || !staffRaw || !branchRaw) {
+    showToast('⚠️ Please enter Officer Name, Staff ID, and Branch Name.');
+    return;
+  }
+
+  document.getElementById('settingsOfficerName').value = toTitleCase(nameRaw);
+  document.getElementById('settingsStaffId').value = staffRaw.toUpperCase();
+  document.getElementById('settingsBranch').value = toTitleCase(branchRaw);
+  closeModal('onboardingModal');
+  await saveSettings();
 }
 
 function showAccessDeniedScreen(user) {
@@ -1049,31 +1140,36 @@ function updateOnlineStatus() {
   }
 }
 
-
 function switchTab(tabId, navElement) {
   document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  const profileBtn = document.getElementById('headerProfileBtn');
+  if (profileBtn) profileBtn.classList.remove('active');
 
   const target = document.getElementById(tabId);
   if (target) target.classList.add('active');
-  if (navElement) navElement.classList.add('active');
-  else {
-    const fallbackNav = document.querySelector(`.nav-item[data-tab="${tabId}"]`);
-    if (fallbackNav) fallbackNav.classList.add('active');
+
+  if (tabId === 'settingsTab') {
+    if (profileBtn) profileBtn.classList.add('active');
+    updateSettingsStats();
+  } else {
+    if (navElement) navElement.classList.add('active');
+    else {
+      const fallbackNav = document.querySelector(`.nav-item[data-tab="${tabId}"]`);
+      if (fallbackNav) fallbackNav.classList.add('active');
+    }
   }
 
   if (tabId === 'leadsTab') {
     renderLeads();
-  } else if (tabId === 'settingsTab') {
-    updateSettingsStats();
   } else if (tabId === 'adminTab' && adminUnlocked) {
     populateAdminControls();
   }
 }
 
-// 10. GEOLOCATION (WITH OSM NOMINATIM REVERSE GEOCODING) & PROPOSAL DISPATCH
-async function reverseGeocodeAddress(lat, lng, timeoutMs = 3000) {
-  const fallback = `GPS: ${lat}, ${lng}`;
+// 10. GEOLOCATION (2-STAGE GPS + OSM NOMINATIM REVERSE GEOCODING) & PROPOSAL DISPATCH
+async function reverseGeocodeAddress(lat, lng, timeoutMs = 3500) {
+  const coordPrefix = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -1082,56 +1178,134 @@ async function reverseGeocodeAddress(lat, lng, timeoutMs = 3000) {
       { signal: controller.signal, headers: { 'Accept-Language': 'en' } }
     );
     clearTimeout(timer);
-    if (!resp.ok) return fallback;
-    const data = await resp.json();
-    if (data && data.address) {
-      const a = data.address;
-      const parts = [
-        a.road || a.pedestrian || a.neighbourhood || a.suburb,
-        a.city_district || a.town || a.village || a.city || a.county,
-        a.state
-      ].filter(Boolean);
-      if (parts.length > 0) return parts.join(', ');
-    }
-    if (data && data.display_name) {
-      return String(data.display_name).split(',').slice(0, 3).map(s => s.trim()).join(', ');
+    if (resp.ok) {
+      const data = await resp.json();
+      let area = '';
+      if (data && data.address) {
+        const a = data.address;
+        const parts = [
+          a.road || a.pedestrian || a.neighbourhood || a.suburb,
+          a.city_district || a.town || a.village || a.city || a.county,
+          a.state
+        ].filter(Boolean);
+        if (parts.length > 0) area = parts.join(', ');
+      }
+      if (!area && data && data.display_name) {
+        area = String(data.display_name).split(',').slice(0, 3).map(s => s.trim()).join(', ');
+      }
+      if (area) return `${coordPrefix} | ${area}`;
     }
   } catch (e) {}
-  return fallback;
+  return coordPrefix;
 }
 
-function captureBrowserLocation(timeoutMs = 3500) {
+function prewarmGeoLocation() {
+  if (!navigator.geolocation) return;
+  try {
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lng = Number(pos.coords.longitude.toFixed(6));
+        const addr = await reverseGeocodeAddress(lat, lng, 3000);
+        lastKnownGeoLocation = {
+          latitude: lat,
+          longitude: lng,
+          locationAddress: addr,
+          locationCapturedAt: Date.now()
+        };
+      },
+      () => {},
+      { enableHighAccuracy: false, timeout: 6000, maximumAge: 300000 }
+    );
+  } catch (e) {}
+}
+
+function getPositionPromise(options) {
   return new Promise((resolve) => {
     if (!navigator.geolocation) {
       resolve(null);
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const lat = Number(pos.coords.latitude.toFixed(6));
-        const lng = Number(pos.coords.longitude.toFixed(6));
-        const addr = await reverseGeocodeAddress(lat, lng, 3000);
-        resolve({
-          latitude: lat,
-          longitude: lng,
-          locationAddress: addr,
-          locationCapturedAt: Date.now()
-        });
-      },
+      (pos) => resolve(pos),
       () => resolve(null),
-      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 60000 }
+      options
     );
+  });
+}
+
+async function captureBrowserLocation(timeoutMs = 5000) {
+  if (!navigator.geolocation) return lastKnownGeoLocation;
+
+  let pos = await getPositionPromise({ enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 60000 });
+  if (!pos) {
+    pos = await getPositionPromise({ enableHighAccuracy: false, timeout: 4500, maximumAge: 300000 });
+  }
+  if (!pos) return lastKnownGeoLocation;
+
+  const lat = Number(pos.coords.latitude.toFixed(6));
+  const lng = Number(pos.coords.longitude.toFixed(6));
+  const addr = await reverseGeocodeAddress(lat, lng, 3500);
+  const resolved = {
+    latitude: lat,
+    longitude: lng,
+    locationAddress: addr,
+    locationCapturedAt: Date.now()
+  };
+  lastKnownGeoLocation = resolved;
+  return resolved;
+}
+
+async function refreshLeadGps(leadId) {
+  const leads = await LocalDB.getAllLeads();
+  const lead = leads.find(l => l.id === leadId);
+  if (!lead) return;
+
+  await withLoading('Capturing GPS & Street Address...', async () => {
+    const loc = await captureBrowserLocation(7000);
+    if (!loc) {
+      showToast('⚠️ GPS unavailable. Please allow Location permission in browser settings.');
+      return;
+    }
+    lead.latitude = loc.latitude;
+    lead.longitude = loc.longitude;
+    lead.locationAddress = loc.locationAddress;
+    lead.locationCapturedAt = loc.locationCapturedAt;
+    lead.syncStatus = 'pending_sync';
+    await LocalDB.saveLead(lead);
+
+    if (fb) {
+      try {
+        await fb.setDoc('leads', lead.id, {
+          latitude: loc.latitude,
+          longitude: loc.longitude,
+          locationAddress: loc.locationAddress,
+          locationCapturedAt: loc.locationCapturedAt,
+          syncStatus: 'synced',
+          updatedAtMs: Date.now(),
+          updatedAt: fb.serverTimestamp()
+        }, true);
+        lead.syncStatus = 'synced';
+        await LocalDB.saveLead(lead);
+      } catch (e) {
+        console.warn('GPS Firestore sync warning:', e);
+      }
+    }
+
+    await renderLeads();
+    showToast(`📍 GPS updated: ${loc.locationAddress}`);
+    if (navigator.onLine && (officerProfile.webhookUrl || globalConfig.googleSheetsWebhookUrl)) syncLeadToSheet(lead);
   });
 }
 
 function buildCalculatorProposalText() {
   if (!currentProduct || !lastCalculation) return '';
-  const cust = document.getElementById('customerName').value.trim() || 'Valued Customer';
+  const cust = toTitleCase(document.getElementById('customerName').value.trim() || 'Valued Customer');
   const isLiab = currentProduct.category === 'liability';
   const emiOrProfit = isLiab ? (lastCalculation.netMonthlyProfit || 0) : (lastCalculation.emi || 0);
   const feeOrTax = isLiab ? (lastCalculation.totalTax || 0) : (lastCalculation.totalFee || 0);
   const totalOrMat = isLiab ? (lastCalculation.netMaturity || 0) : (lastCalculation.totalPayable || 0);
-  const offName = officerProfile.officerName || (currentUser && currentUser.displayName) || 'Officer';
+  const offName = toTitleCase(officerProfile.officerName || (currentUser && currentUser.displayName) || 'Officer');
   const offId = officerProfile.staffId || 'RO';
   const offBranch = officerProfile.branchName || (currentUserProfile && currentUserProfile.branchName) || 'KBL Branch';
 
@@ -1170,12 +1344,13 @@ function copyProposalText() {
 }
 
 async function saveLeadFromCalculator(silent = false) {
-  const custName = document.getElementById('customerName').value.trim();
+  const rawCustName = document.getElementById('customerName').value.trim();
+  const custName = toTitleCase(rawCustName);
   const mobile = document.getElementById('customerMobile').value.trim();
   const dob = document.getElementById('customerDob').value;
   const notes = document.getElementById('leadNotes').value.trim();
   const monthlyIncome = parseFloat(document.getElementById('monthlyIncome').value) || 0;
-  const allowedDbr = parseFloat(document.getElementById('allowedDbr').value) || 50;
+  const allowedDbr = parseFloat(document.getElementById('allowedDbr').value) || 0;
 
   if (!custName) {
     if (!silent) showToast('⚠️ Please enter customer name (گاہک کا نام درج کریں).');
@@ -1195,13 +1370,13 @@ async function saveLeadFromCalculator(silent = false) {
     const existingLeads = await LocalDB.getAllLeads();
     let lead = existingLeads.find(l => l.mobile === mobile || (l.customerName.toLowerCase() === custName.toLowerCase() && l.productName === currentProduct.name));
 
-    const effOffName = officerProfile.officerName || (currentUser && currentUser.displayName) || 'Loan Officer';
+    const effOffName = toTitleCase(officerProfile.officerName || (currentUser && currentUser.displayName) || 'Loan Officer');
     const effOffId = officerProfile.staffId || 'RO';
     const effBranch = officerProfile.branchName || (currentUserProfile && currentUserProfile.branchName) || '';
 
   const now = Date.now();
   const cleanNote = cleanRawActionPayload(notes);
-  const loc = await captureBrowserLocation(2500);
+  const loc = await captureBrowserLocation(silent ? 3500 : 5500);
 
   const isLiab = currentProduct.category === 'liability';
   const effEmi = isLiab ? (lastCalculation.netMonthlyProfit || 0) : (lastCalculation.emi || 0);
@@ -1237,6 +1412,7 @@ async function saveLeadFromCalculator(silent = false) {
 
     if (cleanNote) {
       lead.notes = cleanNote;
+      lead.notesUpdateCount = (lead.notesUpdateCount || 0) + 1;
       lead.activities.push({
         id: 'act-' + now,
         timestamp: now,
@@ -1314,6 +1490,7 @@ async function saveLeadFromCalculator(silent = false) {
       createdAt: now,
       syncStatus: 'pending_sync',
       approachCount: 1,
+      notesUpdateCount: cleanNote ? 1 : 0,
       activities: initialActivities
     };
   }
@@ -1585,31 +1762,31 @@ async function openTrackRecord(leadId) {
   const lead = leads.find(l => l.id === leadId);
   if (!lead) return;
 
+  const dispCust = toTitleCase(lead.customerName || 'Customer');
+  const activities = (lead.activities || []).slice().sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  const approachesCount = Number(lead.approachCount) || Math.max(1, activities.length);
+  const notesCount = Number(lead.notesUpdateCount) || activities.filter(a => a.actionType === 'note_update').length;
+
   document.getElementById('trackRecordCustomerHeader').innerHTML = `
-    <strong>${escapeHtml(lead.customerName)}</strong> (${escapeHtml(lead.mobile)})<br>
-    Facility: ${escapeHtml(lead.productName)} • Status: <strong>${escapeHtml(lead.status)}</strong>
+    <div><strong>${escapeHtml(dispCust)}</strong> (${escapeHtml(lead.mobile)})</div>
+    <div style="margin-bottom: 8px;">Facility: ${escapeHtml(lead.productName)} • Status: <strong>${escapeHtml(lead.status)}</strong></div>
+    <div class="audit-stats-grid">
+      <div class="audit-stat-pill">
+        <span class="audit-stat-label">Approaches</span>
+        <span class="audit-stat-val tabular-nums">${approachesCount} Time${approachesCount === 1 ? '' : 's'}</span>
+      </div>
+      <div class="audit-stat-pill">
+        <span class="audit-stat-label">Note Updates</span>
+        <span class="audit-stat-val tabular-nums">${notesCount} Time${notesCount === 1 ? '' : 's'}</span>
+      </div>
+    </div>
   `;
 
   const list = document.getElementById('trackRecordList');
-  const activities = (lead.activities || []).slice().sort((a, b) => b.timestamp - a.timestamp);
-
   if (activities.length === 0) {
     list.innerHTML = '<div style="color: var(--text-muted); padding: 16px; text-align: center;">No activity recorded yet.</div>';
   } else {
-    list.innerHTML = activities.map(act => {
-      const cleanDetail = cleanRawActionPayload(act.details || '');
-      const timeStr = formatDate(act.timestamp);
-      return `
-        <div class="track-card">
-          <div class="track-header">
-            <span>${escapeHtml(act.title)}</span>
-            <span>${timeStr}</span>
-          </div>
-          <div class="track-detail">${escapeHtml(cleanDetail || act.details)}</div>
-          <div class="track-officer">👤 ${escapeHtml(act.officerName || 'Officer')} (${escapeHtml(act.officerId || 'RO')})</div>
-        </div>
-      `;
-    }).join('');
+    list.innerHTML = `<div class="timeline-list">${activities.map(renderActivityTimelineCardHtml).join('')}</div>`;
   }
   openModal('trackRecordModal');
 }
@@ -1796,7 +1973,7 @@ async function syncLeadToSheet(lead) {
   const payload = {
     action: 'saveLead',
     id: lead.id,
-    customerName: lead.customerName,
+    customerName: toTitleCase(lead.customerName),
     mobile: lead.mobile,
     productName: lead.productName,
     category: lead.category,
@@ -1808,19 +1985,21 @@ async function syncLeadToSheet(lead) {
     status: lead.status || 'New',
     followUpDate: lead.followUpDate || '',
     notes: commentsHistory,
-    officerName: lead.officerName || officerProfile.officerName,
+    officerName: toTitleCase(lead.officerName || officerProfile.officerName),
     officerId: lead.officerId || officerProfile.staffId,
     branchName: lead.branchName || officerProfile.branchName,
     locationAddress: lead.locationAddress || '',
+    activitiesAudit: touchpointLog,
     touchpointLog: touchpointLog,
     approachCount: lead.approachCount || (activities.length || 1),
+    createdAtFormatted: dtFormat,
     timestamp: dtFormat
   };
 
   try {
     await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(payload),
       mode: 'no-cors'
     });
@@ -1903,11 +2082,10 @@ async function loadSettings() {
 
 async function saveSettings() {
   await withLoading('Saving Profile to Cloud...', async () => {
-    officerProfile.officerName = document.getElementById('settingsOfficerName').value.trim() || 'Loan Officer';
+    officerProfile.officerName = toTitleCase(document.getElementById('settingsOfficerName').value.trim() || 'Loan Officer');
     officerProfile.staffId = document.getElementById('settingsStaffId').value.trim() || 'RO-001';
-    // Branch is Cloud-locked (Admin-controlled): preserve synced Cloud branchName
-    const lockedBranch = (currentUserProfile && currentUserProfile.branchName) || officerProfile.branchName || '';
-    officerProfile.branchName = lockedBranch;
+    const editedBranch = document.getElementById('settingsBranch').value.trim();
+    officerProfile.branchName = editedBranch ? toTitleCase(editedBranch) : ((currentUserProfile && currentUserProfile.branchName) || officerProfile.branchName || '');
 
     await LocalDB.setSetting('officerName', officerProfile.officerName);
     await LocalDB.setSetting('staffId', officerProfile.staffId);
@@ -1923,6 +2101,15 @@ async function saveSettings() {
           branchName: officerProfile.branchName,
           updatedAt: Date.now()
         };
+        if (currentUserProfile) {
+          currentUserProfile.officerName = officerProfile.officerName;
+          currentUserProfile.staffId = officerProfile.staffId;
+          currentUserProfile.branchName = officerProfile.branchName;
+          if (!currentUserProfile.allowedSupervisorBranch) {
+            currentUserProfile.allowedSupervisorBranch = officerProfile.branchName;
+            userData.allowedSupervisorBranch = officerProfile.branchName;
+          }
+        }
         await fb.setDoc('users', currentUser.uid, userData, true);
         await fb.setDoc('config', 'global', {
           registeredUsersMap: { [currentUser.uid]: userData }
@@ -1932,12 +2119,14 @@ async function saveSettings() {
       }
     }
 
+    document.getElementById('settingsOfficerName').value = officerProfile.officerName;
+    document.getElementById('settingsStaffId').value = officerProfile.staffId;
     document.getElementById('settingsBranch').value = officerProfile.branchName;
     document.getElementById('officerBadge').textContent = `👤 Officer: ${officerProfile.officerName} (${officerProfile.staffId})`;
     document.getElementById('branchBadge').textContent = `🏢 ${officerProfile.branchName || 'Unassigned'}`;
     await renderLeads();
     await updateSettingsStats();
-    showToast('✅ Profile saved and synced!');
+    showToast('✅ Profile & Branch synced to Cloud!');
   });
 }
 
@@ -1947,21 +2136,21 @@ async function testConnection(customUrl = null) {
     showToast('Please enter Webhook URL in Admin Panel first.');
     return;
   }
+  if (!url.startsWith('https://script.google.com/')) {
+    showToast('⚠️ Enter a valid https://script.google.com/... Web App URL.');
+    return;
+  }
   await withLoading('Testing Google Sheets Webhook...', async () => {
     try {
-      const resp = await fetch(url, {
+      await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: 'ping' }),
-        mode: 'cors'
+        mode: 'no-cors'
       });
-      if (resp.ok) {
-        showToast('✅ Connected successfully to Google Sheets Web App!');
-      } else {
-        showToast('HTTP Response ' + resp.status + ' from endpoint.');
-      }
+      showToast('✅ Webhook reachable! Ping delivered to Google Apps Script.');
     } catch (err) {
-      showToast('Connection note: ' + err.message);
+      showToast('❌ Webhook unreachable: ' + err.message);
     }
   });
 }
@@ -2096,6 +2285,14 @@ function formatForWhatsApp(phone) {
   if (digits.startsWith('03') && digits.length === 11) return '92' + digits.substring(1);
   if (digits.startsWith('3') && digits.length === 10) return '92' + digits;
   return digits;
+}
+
+function toTitleCase(str) {
+  if (!str) return '';
+  return String(str)
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/(^|\s)\S/g, (ch) => ch.toUpperCase());
 }
 
 function escapeHtml(str) {
