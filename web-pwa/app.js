@@ -1739,9 +1739,24 @@ async function refreshLeadGps(leadId) {
   });
 }
 
+function formatUrduTenureLabel(months) {
+  const t = Number(months) || 0;
+  if (t <= 0) return '0 ماہ';
+  if (t === 1) return '1 ماہ';
+  if (t >= 12 && t % 12 === 0) {
+    const yrs = t / 12;
+    return `${t} ماہ (${yrs} سال)`;
+  }
+  if (t > 12) {
+    const yrs = (t / 12).toFixed(1).replace(/\.0$/, '');
+    return `${t} ماہ (${yrs} سال)`;
+  }
+  return `${t} ماہ`;
+}
+
 function formatCompactAllPlansSms(plans, cust, isLiab, offName, offBranch) {
   let list = plans;
-  if (plans.length > 16) {
+  if (plans.length > 20) {
     const picked = [];
     const seen = new Set();
     const addPlan = (p) => {
@@ -1756,18 +1771,21 @@ function formatCompactAllPlansSms(plans, cust, isLiab, offName, offBranch) {
     list = picked.sort((a, b) => a.tenure - b.tenure);
   }
   const lines = [
-    `Dear ${cust}, KBL ${currentProduct.name} Eligible Plans:`
+    `Dear ${cust}, KBL ${currentProduct.name} Eligible Plans:`,
+    ``
   ];
   list.forEach(p => {
     if (isLiab) {
       lines.push(`${p.tenure}M (${p.rate}%): Dep PKR ${formatPKR(p.amount)}, Net Mo PKR ${formatPKR(p.netMonthlyProfit)}, Payout PKR ${formatPKR(p.netMaturity)}`);
     } else {
-      lines.push(`${p.tenure}M: PKR ${formatPKR(p.amount)}, EMI PKR ${formatPKR(p.emi)}, Fee PKR ${formatPKR(p.totalFee)}`);
+      lines.push(`${p.tenure}M: Loan PKR ${formatPKR(p.amount)} | EMI PKR ${formatPKR(p.emi)} | Fee PKR ${formatPKR(p.totalFee)}`);
     }
   });
   if (list.length < plans.length) {
-    lines.push(`(${plans.length} eligible tenures total from ${plans[0].tenure}M to ${plans[plans.length - 1].tenure}M)`);
+    lines.push(``);
+    lines.push(`(${plans.length} interval plans from ${plans[0].tenure}M to ${plans[plans.length - 1].tenure}M)`);
   }
+  lines.push(``);
   lines.push(`Contact: ${offName} (${offBranch})`);
   return lines.join('\n');
 }
@@ -1781,36 +1799,57 @@ function buildCalculatorProposalText(isSmsCompact = false) {
   const offBranch = officerProfile.branchName || (currentUserProfile && currentUserProfile.branchName) || 'KBL Branch';
 
   if (typeof isAllEligibleDispatchMode === 'function' && isAllEligibleDispatchMode() && typeof getEligiblePlansForDispatch === 'function') {
-    const plans = getEligiblePlansForDispatch();
+    const rawEligible = getEligiblePlansForDispatch();
+    const plans = (typeof filterPlansBySixMonthIntervals === 'function')
+      ? filterPlansBySixMonthIntervals(rawEligible)
+      : rawEligible;
+
     if (plans && plans.length > 0) {
       if (isSmsCompact) {
         return formatCompactAllPlansSms(plans, cust, isLiab, offName, offBranch);
       }
       const header = [
         `السلام علیکم جناب *${cust}*،`,
-        `*KBL Financing & Deposit Services*`,
+        isLiab ? `*KBL Deposit & Investment Services*` : `*KBL Financing Services*`,
         ``,
-        `آپ کے لیے *${currentProduct.name}* کے تمام اہل (${plans.length}) پلانز:`
+        `📋 *${currentProduct.name}* کے تمام اہل پلانز:`
       ];
       if (!isLiab && plans[0].dbrVal !== undefined && lastCalculation.monthlyIncome > 0) {
-        header.push(`(آمدنی: PKR ${formatPKR(lastCalculation.monthlyIncome)} • DBR حد: ${lastCalculation.allowedDbr || 50}%)`);
+        header.push(`(ماہانہ آمدنی: PKR ${formatPKR(lastCalculation.monthlyIncome)} • DBR حد: ${lastCalculation.allowedDbr || 50}%)`);
       }
       header.push(`────────────────────`);
 
-      const planLines = plans.map(p => {
+      const planBlocks = plans.map(p => {
+        const durLabel = formatUrduTenureLabel(p.tenure);
         if (isLiab) {
-          return `• *${p.tenure} ماہ* (${p.rate}%): رقم *PKR ${formatPKR(p.amount)}* | ماہانہ منافع *PKR ${formatPKR(p.netMonthlyProfit)}* | کل واپسی *PKR ${formatPKR(p.netMaturity)}*`;
+          return [
+            ``,
+            `📅 *${durLabel}*`,
+            `💵 ڈپازٹ رقم: *PKR ${formatPKR(p.amount)}*`,
+            `📈 شرح منافع: *${p.rate}%*`,
+            `💳 ماہانہ خالص منافع: *PKR ${formatPKR(p.netMonthlyProfit)}*`,
+            `💎 مدت پوری ہونے پر کل واپسی: *PKR ${formatPKR(p.netMaturity)}*`,
+            `┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄`
+          ].join('\n');
         }
-        return `• *${p.tenure} ماہ*: رقم *PKR ${formatPKR(p.amount)}* | قسط *PKR ${formatPKR(p.emi)}* | فیس *PKR ${formatPKR(p.totalFee)}*`;
+        return [
+          ``,
+          `📅 *${durLabel}*`,
+          `💰 قرض کی رقم: *PKR ${formatPKR(p.amount)}*`,
+          `💳 ماہانہ قسط: *PKR ${formatPKR(p.emi)}*`,
+          `🧾 پروسیسنگ فیس: *PKR ${formatPKR(p.totalFee)}*`,
+          `┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄`
+        ].join('\n');
       });
 
       return [
         ...header,
-        ...planLines,
+        ...planBlocks,
+        ``,
         `────────────────────`,
         `مزید تفصیل یا منتخب پلان کے لیے رابطہ فرمائیں۔ شکریہ!`,
-        `آفیسر: ${offName} (${offId})`,
-        `برانچ: ${offBranch}`
+        `🏦 آفیسر: ${offName} (${offId})`,
+        `📍 برانچ: ${offBranch}`
       ].join('\n');
     }
   }
@@ -1820,31 +1859,50 @@ function buildCalculatorProposalText(isSmsCompact = false) {
   const totalOrMat = isLiab ? (lastCalculation.netMaturity || 0) : (lastCalculation.totalPayable || 0);
 
   if (isSmsCompact) {
-    return `Dear ${cust}, KBL Quotation: ${currentProduct.name}, Amount: PKR ${formatPKR(lastCalculation.amount)}, Tenure: ${lastCalculation.tenure}M, Monthly: PKR ${formatPKR(emiOrProfit)}. Contact: ${offName} (${offBranch})`;
+    if (isLiab) {
+      return `Dear ${cust}, KBL Quotation: ${currentProduct.name}, Deposit: PKR ${formatPKR(lastCalculation.amount)}, Tenure: ${lastCalculation.tenure}M, Monthly Net Profit: PKR ${formatPKR(emiOrProfit)}. Contact: ${offName} (${offBranch})`;
+    }
+    return `Dear ${cust}, KBL Quotation: ${currentProduct.name}, Loan: PKR ${formatPKR(lastCalculation.amount)}, Tenure: ${lastCalculation.tenure}M, Monthly EMI: PKR ${formatPKR(emiOrProfit)}, Fee: PKR ${formatPKR(feeOrTax)}. Contact: ${offName} (${offBranch})`;
+  }
+
+  if (isLiab) {
+    return [
+      `السلام علیکم جناب *${cust}*،`,
+      `*KBL Deposit & Investment Services*`,
+      ``,
+      `آپ کی مطلوبہ ڈپازٹ کوٹیشن:`,
+      `────────────────────`,
+      `📋 پراڈکٹ: *${currentProduct.name}*`,
+      `💵 رقم (Principal): *PKR ${formatPKR(lastCalculation.amount)}*`,
+      `📅 مدت (Tenure): *${formatUrduTenureLabel(lastCalculation.tenure)}*`,
+      `📈 شرح منافع: *${lastCalculation.rate}%*`,
+      `💳 ماہانہ خالص منافع (Net Profit): *PKR ${formatPKR(emiOrProfit)}*`,
+      `🧾 ودہولڈنگ ٹیکس (${lastCalculation.taxRate}%): *PKR ${formatPKR(feeOrTax)}*`,
+      `💎 مدت پوری ہونے پر کل خالص رقم: *PKR ${formatPKR(totalOrMat)}*`,
+      `────────────────────`,
+      ``,
+      `مزید معلومات کے لیے رابطہ فرمائیں۔ شکریہ!`,
+      `🏦 آفیسر: ${offName} (${offId})`,
+      `📍 برانچ: ${offBranch}`
+    ].join('\n');
   }
 
   return [
     `السلام علیکم جناب *${cust}*،`,
-    `*KBL Financing & Deposit Services*`,
+    `*KBL Financing Services*`,
     ``,
-    `آپ کی مطلوبہ ${isLiab ? 'ڈپازٹ' : 'لون'} کوٹیشن:`,
-    `• پراڈکٹ: *${currentProduct.name}*`,
-    `• رقم (Principal): *PKR ${formatPKR(lastCalculation.amount)}*`,
-    `• مدت (Tenure): *${lastCalculation.tenure} ماہ*`,
-    `• شرح منافع / مارک اپ: *${lastCalculation.rate}%*`,
-    isLiab
-      ? `• ماہانہ خالص منافع (Net Profit): *PKR ${formatPKR(emiOrProfit)}*`
-      : `• ماہانہ قسط (EMI): *PKR ${formatPKR(emiOrProfit)}*`,
-    isLiab
-      ? `• ودہولڈنگ ٹیکس (${lastCalculation.taxRate}%): *PKR ${formatPKR(feeOrTax)}*`
-      : `• پروسیسنگ فیس (مع FED): *PKR ${formatPKR(feeOrTax)}*`,
-    isLiab
-      ? `• مدت پوری ہونے پر کل خالص رقم: *PKR ${formatPKR(totalOrMat)}*`
-      : `• کل قابل ادائیگی رقم: *PKR ${formatPKR(totalOrMat)}*`,
+    `آپ کی مطلوبہ لون کوٹیشن:`,
+    `────────────────────`,
+    `📋 پراڈکٹ: *${currentProduct.name}*`,
+    `📅 مدت (Tenure): *${formatUrduTenureLabel(lastCalculation.tenure)}*`,
+    `💰 قرض کی رقم: *PKR ${formatPKR(lastCalculation.amount)}*`,
+    `💳 ماہانہ قسط (EMI): *PKR ${formatPKR(emiOrProfit)}*`,
+    `🧾 پروسیسنگ فیس (مع FED): *PKR ${formatPKR(feeOrTax)}*`,
+    `────────────────────`,
     ``,
     `مزید معلومات کے لیے رابطہ فرمائیں۔ شکریہ!`,
-    `آفیسر: ${offName} (${offId})`,
-    `برانچ: ${offBranch}`
+    `🏦 آفیسر: ${offName} (${offId})`,
+    `📍 برانچ: ${offBranch}`
   ].join('\n');
 }
 

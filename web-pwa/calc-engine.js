@@ -794,23 +794,38 @@ function getEligiblePlansForDispatch() {
   return eligible;
 }
 
+function filterPlansBySixMonthIntervals(plans) {
+  if (!Array.isArray(plans) || plans.length === 0) return [];
+  if (currentProduct && currentProduct.category === 'liability') {
+    return plans;
+  }
+  const sixMonthPlans = plans.filter(p => Number(p.tenure) > 0 && Number(p.tenure) % 6 === 0);
+  if (sixMonthPlans.length > 0) {
+    return sixMonthPlans;
+  }
+  // Fallback only if product max tenure < 6 or eligible window has no multiple of 6
+  if (plans.length <= 2) return plans;
+  return [plans[0], plans[plans.length - 1]];
+}
+
 function updateDispatchModeBanner() {
   const banner = document.getElementById('dispatchModeBanner');
   if (!banner || !currentProduct) return;
   const eligible = getEligiblePlansForDispatch();
+  const dispatchPlans = filterPlansBySixMonthIntervals(eligible);
   const isAll = isAllEligibleDispatchMode();
   if (isAll) {
     banner.style.background = 'var(--success-soft)';
     banner.style.borderColor = 'rgba(22, 163, 74, 0.45)';
     banner.style.color = '#15803D';
-    banner.innerHTML = eligible.length > 0
-      ? `<span>📋 Send All Eligible Mode (${eligible.length} Plan${eligible.length === 1 ? '' : 's'})</span><span style="font-size:0.7rem;">Single Tenure ✕</span>`
+    banner.innerHTML = dispatchPlans.length > 0
+      ? `<span>📋 Send All Eligible Mode (${dispatchPlans.length} Plan${dispatchPlans.length === 1 ? '' : 's'})</span><span style="font-size:0.7rem;">Single Tenure ✕</span>`
       : `<span>⚠️ No eligible matrix plans yet</span><span style="font-size:0.7rem;">Switch to Single ✕</span>`;
   } else {
     banner.style.background = 'var(--surface-subtle)';
     banner.style.borderColor = 'var(--border)';
     banner.style.color = 'var(--primary)';
-    banner.innerHTML = `<span>🎯 Single Plan: ${selectedMatrixTenure}M Preview</span><span style="font-size:0.7rem;color:var(--accent);">${eligible.length > 0 ? `Send All ${eligible.length} Plans ▸` : 'All Eligible Plans ▸'}</span>`;
+    banner.innerHTML = `<span>🎯 Single Plan: ${selectedMatrixTenure}M Preview</span><span style="font-size:0.7rem;color:var(--accent);">${dispatchPlans.length > 0 ? `Send All ${dispatchPlans.length} Plans ▸` : 'All Eligible Plans ▸'}</span>`;
   }
 }
 
