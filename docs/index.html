@@ -586,7 +586,10 @@
         <div style="background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;">
           <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;">
             <label class="form-label" for="supervisorBranchInput" style="margin-bottom: 0;">3. 🛡️ Branch Supervisor Filter (BM / AM / RM Rights)</label>
-            <button type="button" class="btn btn-soft btn-sm" id="toggleMyBranchBtn" style="width: auto; min-height: 30px; height: 30px; font-size: 0.72rem;" onclick="toggleMyBranchFilter()">🏢 Filter My Branch</button>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+              <button type="button" class="btn btn-soft btn-sm" id="toggleMyBranchBtn" style="width: auto; min-height: 30px; height: 30px; font-size: 0.72rem;" onclick="toggleMyBranchFilter()">🏢 Filter My Branch</button>
+              <button type="button" class="btn btn-success btn-sm" id="exportAllAuthBranchesBtn" style="width: auto; min-height: 30px; height: 30px; font-size: 0.72rem; display: none;" onclick="exportAllAuthorizedBranchesCsv()">📥 Export All Authorized Branches Leads</button>
+            </div>
           </div>
           <input type="text" class="form-input" id="supervisorBranchInput" placeholder="Type branch name..." oninput="renderLeads()">
           <div id="supervisorAccessStatus" style="font-size: 0.74rem; font-weight: 700; margin-top: 6px; color: var(--text-muted);"></div>

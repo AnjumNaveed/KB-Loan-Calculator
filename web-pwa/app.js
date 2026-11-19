@@ -641,10 +641,10 @@ function initFirebaseAuthAndFirestore() {
 
       await verifyUserAccessAndSyncProfile(user, true);
 
-      // Push any offline-created leads & perform 2-way Google Sheets sync after sign-in
+      // Push any offline-created leads & perform 2-way Google Sheets sync after profile/branch rights are verified
       if (navigator.onLine) {
         flushPendingLeadsToCloudAndSheets(true).then(() => {
-          if (!hasPulledSheetOnAuth && getEffectiveWebhookUrl()) {
+          if (!hasPulledSheetOnAuth && currentUserProfile && getEffectiveWebhookUrl()) {
             hasPulledSheetOnAuth = true;
             return pullLeadsFromGoogleSheet(true);
           }
@@ -699,13 +699,11 @@ function startFirestoreGlobalConfigListener(user) {
       globalConfig.registeredUsersMap = d.registeredUsersMap || {};
       globalConfig.deletedUserKeys = Array.isArray(d.deletedUserKeys) ? d.deletedUserKeys : [];
 
+      let webhookJustUpdated = false;
       if (d.googleSheetsWebhookUrl && officerProfile.webhookUrl !== d.googleSheetsWebhookUrl) {
         officerProfile.webhookUrl = d.googleSheetsWebhookUrl;
         await LocalDB.setSetting('webhookUrl', officerProfile.webhookUrl);
-        if (currentUser && !hasPulledSheetOnAuth && navigator.onLine) {
-          hasPulledSheetOnAuth = true;
-          pullLeadsFromGoogleSheet(true).catch(e => console.warn('Auto sheet pull notice:', e));
-        }
+        webhookJustUpdated = true;
       }
 
       updateAppUpdateBanner();
@@ -717,6 +715,10 @@ function startFirestoreGlobalConfigListener(user) {
       }
       if (user) {
         await verifyUserAccessAndSyncProfile(user, false);
+        if (webhookJustUpdated && currentUser && currentUserProfile && !hasPulledSheetOnAuth && navigator.onLine) {
+          hasPulledSheetOnAuth = true;
+          pullLeadsFromGoogleSheet(true).catch(e => console.warn('Auto sheet pull notice:', e));
+        }
       }
     }
   }, (err) => {
@@ -975,6 +977,10 @@ async function verifyUserAccessAndSyncProfile(user, fetchFresh = false) {
     // Re-bind scoped Firestore leads listener if user's branch/role/staffId changed
     if (getCurrentLeadsScopeKey() !== currentLeadsScopeKey) {
       startFirestoreLeadsListener();
+      if (!fetchRemote && navigator.onLine && currentUserProfile && getEffectiveWebhookUrl()) {
+        hasPulledSheetOnAuth = true;
+        pullLeadsFromGoogleSheet(true).catch(e => console.warn('Scope-change sheet pull notice:', e));
+      }
     } else {
       await pruneOutOfScopeCachedLeads();
     }
@@ -1307,26 +1313,29 @@ function startFirestoreProductsListener() {
 
 // 8. SCOPED REAL-TIME FIRESTORE LEADS SYNCHRONIZATION (Authorized Branch & Own Leads Only)
 function isUserAllBranchesAdmin() {
-  if (typeof isPrimaryAdminUser === 'function' && isPrimaryAdminUser()) return true;
-  if (currentUserProfile && currentUserProfile.role === 'Admin') return true;
+  if (typeof canCurrentUserUseSupervisorFilter === 'function' && !canCurrentUserUseSupervisorFilter()) return false;
+  if (typeof hasExplicitAllBranchesRight === 'function') return hasExplicitAllBranchesRight();
   const effAllowed = typeof getEffectiveAllowedBranch === 'function' ? getEffectiveAllowedBranch() : '';
   const tokens = effAllowed.split(/[,;|]/).map(s => s.trim()).filter(Boolean);
-  return tokens.some(t => t.toUpperCase() === 'ALL' || t === '*');
+  return tokens.some(t => {
+    const up = t.toUpperCase();
+    return up === 'ALL' || up === 'ALL BRANCHES' || t === '*';
+  });
 }
 
 function buildBranchQueryVariations(effAllowed) {
   if (!effAllowed) return [];
   const tokens = effAllowed.split(/[,;|]/).map(s => s.trim()).filter(Boolean);
   const set = new Set();
-  tokens.forEach(tok => {
-    const raw = tok.trim();
-    if (!raw || raw.toUpperCase() === 'ALL' || raw === '*') return;
+  const addVariants = (rawVal) => {
+    const raw = String(rawVal || '').trim();
+    if (!raw || ['ALL', 'ALL BRANCHES', '*'].includes(raw.toUpperCase())) return;
     set.add(raw);
-    const noBranch = raw.replace(/\s*\bbranch\b\s*/gi, ' ').replace(/\s+/g, ' ').trim();
     const titleRaw = typeof toTitleCase === 'function' ? toTitleCase(raw) : raw;
     set.add(titleRaw);
     set.add(raw.toLowerCase());
     set.add(raw.toUpperCase());
+    const noBranch = raw.replace(/\s*\bbranch\b\s*/gi, ' ').replace(/\s+/g, ' ').trim();
     if (noBranch) {
       const titleShort = typeof toTitleCase === 'function' ? toTitleCase(noBranch) : noBranch;
       set.add(noBranch);
@@ -1336,6 +1345,18 @@ function buildBranchQueryVariations(effAllowed) {
       set.add(`${titleShort} Branch`);
       set.add(`${noBranch} Branch`);
       set.add(`${noBranch.toLowerCase()} branch`);
+    }
+  };
+
+  tokens.forEach(tok => {
+    addVariants(tok);
+    if (typeof canonicalBranchCode === 'function' && typeof BRANCH_SHORT_CODES === 'object') {
+      const canon = canonicalBranchCode(tok);
+      if (canon) {
+        Object.entries(BRANCH_SHORT_CODES).forEach(([alias, code]) => {
+          if (code === canon) addVariants(alias);
+        });
+      }
     }
   });
   return Array.from(set).filter(Boolean);
@@ -2854,7 +2875,13 @@ async function pullLeadsFromGoogleSheet(silent = false) {
       if (!isSheetLeadAuthorizedForCurrentUser(candidate)) continue;
 
       const phoneKey = cleanPhoneDigits(candidate.mobile);
-      const match = byId.get(candidate.id) || (phoneKey ? byPhone.get(phoneKey) : null);
+      const isCandidateSheetRow = String(candidate.id || '').startsWith('sheet-row-');
+      const phoneCandidate = phoneKey ? byPhone.get(phoneKey) : null;
+      const match = byId.get(candidate.id) || (
+        phoneCandidate && (isCandidateSheetRow || String(phoneCandidate.id || '').startsWith('sheet-row-'))
+          ? phoneCandidate
+          : null
+      );
 
       if (!match) {
         // Only attach currentUser.uid when the Sheet row genuinely belongs to the current officer
@@ -2880,10 +2907,17 @@ async function pullLeadsFromGoogleSheet(silent = false) {
           }
         }
       } else {
-        // Fill missing metadata without clobbering newer Firestore/local state
+        // Sync Google Sheet Column P branchName & missing metadata without clobbering newer Firestore/local state
         let changed = false;
         if (currentUser && match.userId === currentUser.uid && String(match.id || '').startsWith('sheet-row-') && !isLeadOwnedByCurrentOfficer(match)) {
           match.userId = '';
+          changed = true;
+        }
+        const candBranch = String(candidate.branchName || '').trim();
+        const isValidCandBranch = Boolean(candBranch) && !['unassigned', 'n/a', 'na', 'unknown'].includes(candBranch.toLowerCase());
+        const normBranch = (b) => (typeof normalizeBranchText === 'function' ? normalizeBranchText(b) : String(b || '').trim().toLowerCase());
+        if (isValidCandBranch && normBranch(match.branchName) !== normBranch(candBranch)) {
+          match.branchName = candBranch;
           changed = true;
         }
         if (!match.notes && candidate.notes) { match.notes = candidate.notes; changed = true; }
@@ -2907,6 +2941,7 @@ async function pullLeadsFromGoogleSheet(silent = false) {
       }
     }
 
+    await pruneOutOfScopeCachedLeads();
     lastCloudSyncTime = Date.now();
     await renderLeads();
     await updateSettingsStats();

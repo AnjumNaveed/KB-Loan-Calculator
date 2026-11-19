@@ -174,12 +174,38 @@ function doGet(e) {
 // =========================================================================
 // 1. BRANCH AUTHORIZATION HELPERS (Exact Android LeadsScreen.kt Parity)
 // =========================================================================
+const BRANCH_SHORT_CODES = {
+  psr: 'peshawar', peshawar: 'peshawar',
+  mdn: 'mardan', mardan: 'mardan',
+  isb: 'islamabad', islamabad: 'islamabad',
+  rwp: 'rawalpindi', rawalpindi: 'rawalpindi',
+  lhr: 'lahore', lahore: 'lahore',
+  khi: 'karachi', karachi: 'karachi',
+  fsd: 'faisalabad', faisalabad: 'faisalabad',
+  mul: 'multan', multan: 'multan',
+  qta: 'quetta', quetta: 'quetta',
+  swt: 'swat', swat: 'swat',
+  atk: 'attock', attock: 'attock',
+  abt: 'abbottabad', abbottabad: 'abbottabad',
+  dik: 'deraismailkhan', 'dera ismail khan': 'deraismailkhan',
+  grw: 'gujranwala', gujranwala: 'gujranwala',
+  skt: 'sialkot', sialkot: 'sialkot',
+  bwp: 'bahawalpur', bahawalpur: 'bahawalpur',
+  hyd: 'hyderabad', hyderabad: 'hyderabad',
+  suk: 'sukkur', sukkur: 'sukkur',
+  gwd: 'gwadar', gwadar: 'gwadar',
+  mir: 'mirpur', mirpur: 'mirpur',
+  mzd: 'muzaffarabad', muzaffarabad: 'muzaffarabad'
+};
+
 function normalizeBranchText(branch) {
   return String(branch || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 function canonicalBranchCode(branch) {
-  return normalizeBranchText(branch).replace(/branch/g, '').replace(/\s+/g, '').trim();
+  const clean = normalizeBranchText(branch).replace(/\bbranch\b/g, ' ').replace(/\s+/g, ' ').trim();
+  const compact = clean.replace(/\s+/g, '');
+  return BRANCH_SHORT_CODES[clean] || BRANCH_SHORT_CODES[compact] || compact;
 }
 
 function isPrimaryAdminUser() {
@@ -189,47 +215,72 @@ function isPrimaryAdminUser() {
 }
 
 function getEffectiveAllowedBranch() {
-  if (isPrimaryAdminUser() || (currentUserProfile && currentUserProfile.role === 'Admin')) {
-    return 'ALL';
-  }
-  const allowed = (currentUserProfile && currentUserProfile.allowedSupervisorBranch) || '';
+  // Strictly follow User Access & Branch Rights -> Allowed Supervisor Branch for ALL users (including Admins)
+  const allowed = (currentUserProfile && currentUserProfile.allowedSupervisorBranch)
+    ? String(currentUserProfile.allowedSupervisorBranch).trim()
+    : '';
+  if (allowed) return allowed;
   const home = (currentUserProfile && currentUserProfile.branchName) || officerProfile.branchName || '';
-  return (allowed || home).trim();
+  return String(home).trim();
 }
 
 function canCurrentUserUseSupervisorFilter() {
-  if (isPrimaryAdminUser() || (currentUserProfile && currentUserProfile.role === 'Admin')) return true;
-  if (!currentUserProfile) return true;
-  return currentUserProfile.canUseSupervisorFilter !== false;
+  if (currentUserProfile && currentUserProfile.canUseSupervisorFilter === false) return false;
+  if (!currentUserProfile && currentUser) return false;
+  return true;
+}
+
+function getAuthorizedBranchTokens() {
+  const effAllowed = getEffectiveAllowedBranch();
+  return effAllowed.split(/[,;|]/).map(s => s.trim()).filter(Boolean);
+}
+
+function hasExplicitAllBranchesRight(tokens) {
+  return (tokens || getAuthorizedBranchTokens()).some(t => {
+    const up = t.toUpperCase();
+    return up === 'ALL' || up === 'ALL BRANCHES' || t === '*';
+  });
 }
 
 function isBranchAuthorizedForQuery(queryBranch, leadBranch) {
   const cleanQ = normalizeBranchText(queryBranch);
   const cleanLead = normalizeBranchText(leadBranch);
   if (!cleanQ || !cleanLead) return false;
-  const compactQ = canonicalBranchCode(queryBranch);
-  const compactLead = canonicalBranchCode(leadBranch);
+
+  const canonQ = canonicalBranchCode(queryBranch);
+  const canonLead = canonicalBranchCode(leadBranch);
+  if (canonQ && canonLead && canonQ === canonLead) return true;
+
+  const compactQ = cleanQ.replace(/\bbranch\b/g, '').replace(/\s+/g, '').trim();
+  const compactLead = cleanLead.replace(/\bbranch\b/g, '').replace(/\s+/g, '').trim();
+  // Short queries / short codes (<= 4 chars) must match canonical or exact code — never loose substring
+  if (compactQ.length <= 4 || compactLead.length <= 4) {
+    return compactQ === compactLead || (Boolean(canonQ) && canonQ === canonLead);
+  }
   return cleanLead === cleanQ ||
     cleanLead.includes(cleanQ) ||
-    (compactQ.length >= 3 && (compactLead === compactQ || compactLead.includes(compactQ)));
+    cleanQ.includes(cleanLead) ||
+    (compactQ.length >= 5 && compactLead.includes(compactQ)) ||
+    (compactLead.length >= 5 && compactQ.includes(compactLead));
 }
 
 function isSupervisorQueryAllowed(queryBranch) {
   const cleanQ = normalizeBranchText(queryBranch);
   if (!cleanQ) return true;
   if (!canCurrentUserUseSupervisorFilter()) return false;
-  const effAllowed = getEffectiveAllowedBranch();
-  if (!effAllowed) return false;
-  const tokens = effAllowed.split(/[,;|]/).map(s => s.trim()).filter(Boolean);
-  if (tokens.some(t => t.toUpperCase() === 'ALL' || t === '*')) return true;
-  const compactQ = canonicalBranchCode(queryBranch);
-  return tokens.some(tok => {
-    const cleanAllowed = normalizeBranchText(tok);
-    const compactAllowed = canonicalBranchCode(tok);
-    return cleanQ === cleanAllowed ||
-      cleanAllowed.includes(cleanQ) ||
-      cleanQ.includes(cleanAllowed) ||
-      (compactQ.length >= 2 && (compactQ === compactAllowed || compactAllowed.includes(compactQ)));
+  const tokens = getAuthorizedBranchTokens();
+  if (tokens.length === 0) return false;
+  if (hasExplicitAllBranchesRight(tokens)) return true;
+
+  const queryTokens = String(queryBranch || '')
+    .split(/[,;|]/)
+    .map(s => normalizeBranchText(s))
+    .filter(Boolean);
+  if (queryTokens.length === 0) return true;
+
+  return queryTokens.every(qTok => {
+    if (qTok === 'all' || qTok === 'all branches' || qTok === '*') return false;
+    return tokens.some(allowedTok => isBranchAuthorizedForQuery(qTok, allowedTok));
   });
 }
 
@@ -302,25 +353,42 @@ function getAllRegisteredUsersList() {
 }
 
 function resolveLeadEffectiveBranch(lead) {
-  const directBranch = (lead.branchName || '').trim();
+  // Prioritize Google Sheet Column P / stored lead branchName first; fallback to officer profile branch only if blank
+  const directBranch = String(lead && lead.branchName ? lead.branchName : '').trim();
+  const isBlankDirect = !directBranch || ['unassigned', 'n/a', 'na', 'unknown'].includes(directBranch.toLowerCase());
+  if (!isBlankDirect) {
+    return directBranch;
+  }
+
   const regUsers = getAllRegisteredUsersList();
+  const leadStaff = String(lead && lead.officerId ? lead.officerId : '').trim().toLowerCase();
+  const leadName = String(lead && lead.officerName ? lead.officerName : '').trim().toLowerCase();
   const matched = regUsers.find(u =>
     (lead.userId && u.uid === lead.userId) ||
-    (lead.officerId && u.staffId && u.staffId.toLowerCase() === lead.officerId.toLowerCase())
+    (leadStaff && u.staffId && u.staffId.trim().toLowerCase() === leadStaff) ||
+    (leadName && u.officerName && u.officerName.trim().toLowerCase() === leadName)
   );
   if (matched && matched.branchName && matched.branchName.trim()) {
     return matched.branchName.trim();
   }
-  return directBranch;
+  if (matched && matched.allowedSupervisorBranch) {
+    const firstAuth = String(matched.allowedSupervisorBranch)
+      .split(/[,;|]/)
+      .map(s => s.trim())
+      .find(s => s && s.toUpperCase() !== 'ALL' && s !== '*');
+    if (firstAuth) return firstAuth;
+  }
+  return '';
 }
 
 function toggleMyBranchFilter() {
   const inp = document.getElementById('supervisorBranchInput');
   if (!inp) return;
-  const effAllowed = getEffectiveAllowedBranch();
-  const firstAllowed = effAllowed.split(/[,;|]/).map(s => s.trim()).filter(Boolean)[0] || '';
-  const targetBranch = (!effAllowed || effAllowed.toUpperCase() === 'ALL')
-    ? (officerProfile.branchName || '')
+  const allowedTokens = getAuthorizedBranchTokens();
+  const hasAll = hasExplicitAllBranchesRight(allowedTokens);
+  const firstAllowed = allowedTokens.find(t => !['ALL', 'ALL BRANCHES', '*'].includes(t.toUpperCase())) || '';
+  const targetBranch = hasAll
+    ? (officerProfile.branchName || firstAllowed || 'ALL')
     : (officerProfile.branchName && isSupervisorQueryAllowed(officerProfile.branchName) ? officerProfile.branchName : firstAllowed);
 
   if (inp.value.trim()) {
@@ -354,8 +422,22 @@ function getFilteredAuthorizedLeads(allLeads) {
 
   const canFilter = canCurrentUserUseSupervisorFilter();
   const effAllowed = getEffectiveAllowedBranch();
-  const hasAllRights = effAllowed.split(/[,;|]/).some(t => t.trim().toUpperCase() === 'ALL' || t.trim() === '*');
+  const allowedTokens = getAuthorizedBranchTokens();
+  const hasAllRights = hasExplicitAllBranchesRight(allowedTokens);
   const unauthorizedQuery = supQuery && !isSupervisorQueryAllowed(supQuery);
+
+  // Show multi-branch export button ONLY when multiple branches (or ALL) are assigned
+  const exportAllBtn = document.getElementById('exportAllAuthBranchesBtn');
+  if (exportAllBtn) {
+    const distinctCanonical = Array.from(new Set(
+      allowedTokens
+        .filter(t => !['ALL', 'ALL BRANCHES', '*'].includes(t.toUpperCase()))
+        .map(t => canonicalBranchCode(t))
+        .filter(Boolean)
+    ));
+    const showMultiExport = canFilter && (hasAllRights || distinctCanonical.length > 1);
+    exportAllBtn.style.display = showMultiExport ? 'inline-flex' : 'none';
+  }
 
   // Update Supervisor status banner
   const statusEl = document.getElementById('supervisorAccessStatus');
@@ -373,7 +455,7 @@ function getFilteredAuthorizedLeads(allLeads) {
     } else if (hasAllRights) {
       statusEl.style.color = 'var(--success)';
       statusEl.textContent = supQuery
-        ? `🔓 Admin Branch Filter Active: "${supQuery.toUpperCase() === 'ALL' ? 'ALL BRANCHES' : supQuery}"`
+        ? `🔓 All-Branches Filter Active: "${supQuery.toUpperCase() === 'ALL' ? 'ALL BRANCHES' : supQuery}"`
         : '👤 Showing My Leads (Type branch name or "ALL" above to monitor other branches)';
     } else {
       statusEl.style.color = 'var(--primary)';
@@ -391,17 +473,22 @@ function getFilteredAuthorizedLeads(allLeads) {
     };
   }
 
-  // Personal-First Default: Always show ONLY officer's own leads until a Branch Filter is entered
-  const allowedTokens = effAllowed.split(/[,;|]/).map(s => s.trim()).filter(Boolean);
+  // Personal-First Default: Always show ONLY officer's own leads until a valid Branch Filter is entered
   const isLeadAllowedForBranchRights = (leadBranch) =>
     hasAllRights || allowedTokens.some(tok => isBranchAuthorizedForQuery(tok, leadBranch));
+
+  const queryTokens = supQuery
+    ? supQuery.split(/[,;|]/).map(s => s.trim()).filter(Boolean)
+    : [];
 
   const scopeLeads = allLeads.filter(l => {
     const effBranch = resolveLeadEffectiveBranch(l);
     if (supQuery && canFilter) {
       if (!isLeadAllowedForBranchRights(effBranch)) return false;
-      if (hasAllRights && supQuery.trim().toUpperCase() === 'ALL') return true;
-      return isBranchAuthorizedForQuery(supQuery, effBranch);
+      if (hasAllRights && queryTokens.some(t => ['ALL', 'ALL BRANCHES', '*'].includes(t.toUpperCase()))) {
+        return true;
+      }
+      return queryTokens.some(qTok => isBranchAuthorizedForQuery(qTok, effBranch));
     }
     return isLeadOwnedByCurrentOfficer(l);
   });
@@ -754,6 +841,39 @@ async function exportFilteredLeadsCsv() {
     const allLeads = await LocalDB.getAllLeads();
     const { leads } = getFilteredAuthorizedLeads(allLeads);
     downloadLeadsAsCsv(leads, `kbl-leads-${new Date().toISOString().slice(0, 10)}.csv`);
+  });
+}
+
+async function exportAllAuthorizedBranchesCsv() {
+  if (!canCurrentUserUseSupervisorFilter()) {
+    showToast('🔒 Supervisor branch access is disabled for this account.');
+    return;
+  }
+  await withLoading('Exporting All Authorized Branches Leads...', async () => {
+    const allLeads = await LocalDB.getAllLeads();
+    const allowedTokens = getAuthorizedBranchTokens();
+    const hasAllRights = hasExplicitAllBranchesRight(allowedTokens);
+    const statusFilter = document.getElementById('statusFilterSelect')?.value || 'All';
+    const search = (document.getElementById('searchLeadsInput')?.value || '').toLowerCase().trim();
+
+    const branchLeads = allLeads.filter(l => {
+      const effBranch = resolveLeadEffectiveBranch(l);
+      const inBranchScope = hasAllRights ||
+        allowedTokens.some(tok => isBranchAuthorizedForQuery(tok, effBranch)) ||
+        isLeadOwnedByCurrentOfficer(l);
+      if (!inBranchScope) return false;
+      if (statusFilter !== 'All' && (l.status || 'New') !== statusFilter) return false;
+      if (search) {
+        const hay = [
+          l.customerName, l.mobile, l.productName, l.branchName,
+          effBranch, l.officerName, l.officerId, l.notes, l.locationAddress
+        ].join(' ').toLowerCase();
+        if (!hay.includes(search)) return false;
+      }
+      return true;
+    }).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+    downloadLeadsAsCsv(branchLeads, `kbl-all-authorized-branches-${new Date().toISOString().slice(0, 10)}.csv`);
   });
 }
 
